@@ -1,7 +1,9 @@
 mod entity;
 mod game;
 mod input;
+mod projectile;
 mod tile_map;
+mod weapon;
 
 use game::GameState;
 use macroquad::prelude::*;

@@ -2,6 +2,7 @@ use macroquad::prelude::*;
 
 use crate::input::MoveDirection;
 use crate::tile_map::{TILE_SIZE, TileMap};
+use crate::weapon::Weapon;
 
 const MOVE_SPEED: f32 = 5.0;
 
@@ -42,10 +43,18 @@ impl Position {
     pub fn is_at_target(&self) -> bool {
         (self.visual_x - self.x as f32).abs() < 0.1 && (self.visual_y - self.y as f32).abs() < 0.1
     }
+
+    pub fn center_pixel(&self) -> (f32, f32) {
+        (
+            self.visual_x * TILE_SIZE + TILE_SIZE / 2.0,
+            self.visual_y * TILE_SIZE + TILE_SIZE / 2.0,
+        )
+    }
 }
 
 pub struct Player {
     pub pos: Position,
+    pub weapon: Weapon,
     color: Color,
 }
 
@@ -53,6 +62,7 @@ impl Player {
     pub fn new(x: i32, y: i32) -> Self {
         Self {
             pos: Position::new(x, y),
+            weapon: Weapon::pistol(),
             color: Color::from_rgba(80, 180, 80, 255),
         }
     }
@@ -70,6 +80,7 @@ impl Player {
         }
 
         self.pos.update_visual(dt);
+        self.weapon.update(dt);
     }
 
     pub fn draw(&self) {

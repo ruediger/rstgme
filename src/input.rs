@@ -31,6 +31,14 @@ pub fn get_player_input() -> MoveDirection {
     dir
 }
 
+pub fn get_mouse_position() -> (f32, f32) {
+    mouse_position()
+}
+
+pub fn is_shooting() -> bool {
+    is_mouse_button_down(MouseButton::Left)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
