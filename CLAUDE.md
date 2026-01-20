@@ -39,7 +39,7 @@ Use `cargo fmt` to keep code formatted and `cargo clippy` to lint the code.
 - Mouse aiming with visual aim line
 - Shooting with left mouse button
 - Projectile-bot collision with score tracking
-- Multiple weapons (1-5 keys): Fist, Pistol, Shotgun, Machine Pistol, Rifle
+- Multiple weapons (1-5 keys): Knife, Pistol, Shotgun, Machine Pistol, Rifle
 - Extended tile system with different behaviors
 - Player health system (100 HP, respawn on death)
 - Lava deals 25 damage per second

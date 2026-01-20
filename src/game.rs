@@ -10,12 +10,105 @@ const MAP_WIDTH: usize = 60;
 const MAP_HEIGHT: usize = 45;
 const NUM_BOTS: usize = 10;
 const LAVA_DAMAGE_PER_SECOND: i32 = 25;
+const MELEE_SWING_DURATION: f32 = 0.15;
+const MELEE_SWING_ARC: f32 = std::f32::consts::PI * 0.6; // ~108 degrees
+
+struct MeleeSwing {
+    x: f32,
+    y: f32,
+    angle: f32, // Center angle of the swing
+    range: f32,
+    timer: f32,
+}
+
+impl MeleeSwing {
+    fn new(x: f32, y: f32, target_x: f32, target_y: f32, range: f32) -> Self {
+        let dx = target_x - x;
+        let dy = target_y - y;
+        let angle = dy.atan2(dx);
+        Self {
+            x,
+            y,
+            angle,
+            range,
+            timer: MELEE_SWING_DURATION,
+        }
+    }
+
+    fn update(&mut self, dt: f32) {
+        self.timer -= dt;
+    }
+
+    fn is_alive(&self) -> bool {
+        self.timer > 0.0
+    }
+
+    fn draw(&self, camera_x: f32, camera_y: f32) {
+        let progress = 1.0 - (self.timer / MELEE_SWING_DURATION);
+        let alpha = ((1.0 - progress) * 200.0) as u8;
+
+        // Draw arc segments
+        let half_arc = MELEE_SWING_ARC / 2.0;
+        let start_angle = self.angle - half_arc;
+        let segments = 8;
+
+        let screen_x = self.x - camera_x;
+        let screen_y = self.y - camera_y;
+
+        // Animate the swing - starts from one side, sweeps to the other
+        let sweep_progress = progress;
+        let current_sweep = sweep_progress * MELEE_SWING_ARC;
+
+        for i in 0..segments {
+            // Only draw segments that have been "swept" through
+            let t0 = i as f32 / segments as f32;
+            let t1 = (i + 1) as f32 / segments as f32;
+
+            if t1 <= sweep_progress {
+                let a0 = start_angle + t0 * MELEE_SWING_ARC;
+                let a1 = start_angle + t1 * MELEE_SWING_ARC;
+
+                let x0 = screen_x + a0.cos() * self.range;
+                let y0 = screen_y + a0.sin() * self.range;
+                let x1 = screen_x + a1.cos() * self.range;
+                let y1 = screen_y + a1.sin() * self.range;
+
+                // Fade out segments that were drawn earlier
+                let seg_alpha = (alpha as f32 * (1.0 - t0 * 0.5)) as u8;
+                draw_line(
+                    x0,
+                    y0,
+                    x1,
+                    y1,
+                    3.0,
+                    Color::from_rgba(255, 200, 100, seg_alpha),
+                );
+            }
+        }
+
+        // Draw the leading edge of the swing
+        if sweep_progress > 0.0 {
+            let lead_angle = start_angle + current_sweep;
+            let lead_x = screen_x + lead_angle.cos() * self.range;
+            let lead_y = screen_y + lead_angle.sin() * self.range;
+            draw_line(
+                screen_x,
+                screen_y,
+                lead_x,
+                lead_y,
+                2.0,
+                Color::from_rgba(255, 255, 200, alpha),
+            );
+        }
+    }
+}
 
 pub struct GameState {
     map: TileMap,
     player: Player,
     bots: Vec<Bot>,
     projectiles: Vec<Projectile>,
+    melee_swings: Vec<MeleeSwing>,
     score: u32,
     camera_x: f32,
     camera_y: f32,
@@ -42,6 +135,7 @@ impl GameState {
             player,
             bots,
             projectiles: Vec::new(),
+            melee_swings: Vec::new(),
             score: 0,
             camera_x: 0.0,
             camera_y: 0.0,
@@ -190,6 +284,10 @@ impl GameState {
             self.player.weapon_mut().fire();
 
             if self.player.weapon().is_melee {
+                let (px, py) = self.player.pos.center_pixel();
+                let range = self.player.weapon().range;
+                self.melee_swings
+                    .push(MeleeSwing::new(px, py, world_mx, world_my, range));
                 self.handle_melee_attack(world_mx, world_my);
             } else {
                 self.create_projectiles(world_mx, world_my);
@@ -232,6 +330,12 @@ impl GameState {
         // Remove dead projectiles
         self.projectiles.retain(|p| p.alive);
 
+        // Update melee swings
+        for swing in &mut self.melee_swings {
+            swing.update(dt);
+        }
+        self.melee_swings.retain(|s| s.is_alive());
+
         for bot in &mut self.bots {
             bot.update(dt, &self.map);
         }
@@ -264,6 +368,10 @@ impl GameState {
 
         for projectile in &self.projectiles {
             projectile.draw(self.camera_x, self.camera_y);
+        }
+
+        for swing in &self.melee_swings {
+            swing.draw(self.camera_x, self.camera_y);
         }
 
         // Draw HUD (fixed on screen)
@@ -320,7 +428,7 @@ impl GameState {
             YELLOW,
         );
         draw_text(
-            "1:Fist 2:Pistol 3:Shotgun 4:MP 5:Rifle",
+            "1:Knife 2:Pistol 3:Shotgun 4:MP 5:Rifle",
             10.0,
             105.0,
             16.0,

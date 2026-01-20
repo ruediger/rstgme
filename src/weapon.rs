@@ -13,9 +13,9 @@ pub struct Weapon {
 }
 
 impl Weapon {
-    pub fn fist() -> Self {
+    pub fn knife() -> Self {
         Self {
-            name: "Fist",
+            name: "Knife",
             fire_rate: 2.0,
             bullet_speed: 0.0,
             range: TILE_SIZE * 1.5,
@@ -80,7 +80,7 @@ impl Weapon {
 
     pub fn all_weapons() -> Vec<Weapon> {
         vec![
-            Self::fist(),
+            Self::knife(),
             Self::pistol(),
             Self::shotgun(),
             Self::machine_pistol(),
@@ -131,7 +131,7 @@ mod tests {
     fn test_all_weapons() {
         let weapons = Weapon::all_weapons();
         assert_eq!(weapons.len(), 5);
-        assert_eq!(weapons[0].name, "Fist");
+        assert_eq!(weapons[0].name, "Knife");
         assert!(weapons[0].is_melee);
     }
 }
