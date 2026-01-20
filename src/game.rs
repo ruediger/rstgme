@@ -24,8 +24,9 @@ impl GameState {
     pub fn new() -> Self {
         let map = TileMap::create_random(MAP_WIDTH, MAP_HEIGHT);
 
-        // Place player in center-ish area
-        let player = Player::new(MAP_WIDTH as i32 / 2, MAP_HEIGHT as i32 / 2);
+        // Place player at a walkable spot
+        let (px, py) = Self::find_walkable_spot(&map);
+        let player = Player::new(px, py);
 
         // Add bots at random walkable positions
         let mut bots = Vec::with_capacity(NUM_BOTS);
