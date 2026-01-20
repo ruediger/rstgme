@@ -109,6 +109,8 @@ impl MeleeSwing {
     }
 }
 
+const DAMAGE_FLASH_DURATION: f32 = 0.35;
+
 pub struct GameState {
     map: TileMap,
     player: Player,
@@ -120,6 +122,7 @@ pub struct GameState {
     camera_x: f32,
     camera_y: f32,
     lava_damage_accumulator: f32,
+    damage_flash_timer: f32,
 }
 
 impl GameState {
@@ -155,6 +158,7 @@ impl GameState {
             camera_x: 0.0,
             camera_y: 0.0,
             lava_damage_accumulator: 0.0,
+            damage_flash_timer: 0.0,
         }
     }
 
@@ -276,6 +280,11 @@ impl GameState {
         let input = get_player_input();
         self.player.update(dt, input, &self.map);
 
+        // Update damage flash timer
+        if self.damage_flash_timer > 0.0 {
+            self.damage_flash_timer -= dt;
+        }
+
         // Apply lava damage (speed boost grants lava immunity)
         if self.map.is_lava_at(self.player.pos.x, self.player.pos.y)
             && self.player.speed_boost_timer <= 0.0
@@ -283,7 +292,12 @@ impl GameState {
             self.lava_damage_accumulator += LAVA_DAMAGE_PER_SECOND as f32 * dt;
             let damage = self.lava_damage_accumulator as i32;
             if damage > 0 {
+                let prev_health = self.player.health;
                 self.player.take_damage(damage);
+                // Only start a new flash if the previous one has faded
+                if self.player.health < prev_health && self.damage_flash_timer <= 0.0 {
+                    self.damage_flash_timer = DAMAGE_FLASH_DURATION;
+                }
                 self.lava_damage_accumulator -= damage as f32;
             }
         } else {
@@ -435,6 +449,18 @@ impl GameState {
         // Draw items
         for item in &self.items {
             item.draw(self.camera_x, self.camera_y, sprites);
+        }
+
+        // Draw damage flash overlay
+        if self.damage_flash_timer > 0.0 {
+            let alpha = (self.damage_flash_timer / DAMAGE_FLASH_DURATION * 100.0) as u8;
+            draw_rectangle(
+                0.0,
+                0.0,
+                screen_width(),
+                screen_height(),
+                Color::from_rgba(255, 0, 0, alpha),
+            );
         }
 
         // Draw HUD (fixed on screen)
