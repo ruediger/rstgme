@@ -3,12 +3,13 @@ use macroquad::prelude::*;
 use crate::entity::{Bot, Player};
 use crate::input::{get_mouse_position, get_player_input, get_weapon_switch, is_shooting};
 use crate::projectile::Projectile;
-use crate::tile_map::{TILE_SIZE, TileMap};
+use crate::tile_map::{EntityType, TILE_SIZE, TileMap};
 
 const BOT_HITBOX_SIZE: f32 = TILE_SIZE - 8.0;
 const MAP_WIDTH: usize = 60;
 const MAP_HEIGHT: usize = 45;
 const NUM_BOTS: usize = 10;
+const LAVA_DAMAGE_PER_SECOND: i32 = 25;
 
 pub struct GameState {
     map: TileMap,
@@ -18,6 +19,7 @@ pub struct GameState {
     score: u32,
     camera_x: f32,
     camera_y: f32,
+    lava_damage_accumulator: f32,
 }
 
 impl GameState {
@@ -43,6 +45,7 @@ impl GameState {
             score: 0,
             camera_x: 0.0,
             camera_y: 0.0,
+            lava_damage_accumulator: 0.0,
         }
     }
 
@@ -50,7 +53,8 @@ impl GameState {
         loop {
             let x = rand::gen_range(2, map.width - 2) as i32;
             let y = rand::gen_range(2, map.height - 2) as i32;
-            if map.is_walkable(x, y) {
+            // Use Player entity type - bots may not be able to walk everywhere player can
+            if map.is_walkable_by(x, y, EntityType::Player) {
                 return (x, y);
             }
         }
@@ -148,6 +152,13 @@ impl GameState {
     }
 
     pub fn update(&mut self, dt: f32) {
+        // Check if player is dead and respawn
+        if !self.player.is_alive() {
+            let (x, y) = Self::find_walkable_spot(&self.map);
+            self.player.respawn(x, y);
+            self.lava_damage_accumulator = 0.0;
+        }
+
         // Handle weapon switching
         if let Some(weapon_index) = get_weapon_switch() {
             self.player.switch_weapon(weapon_index);
@@ -155,6 +166,18 @@ impl GameState {
 
         let input = get_player_input();
         self.player.update(dt, input, &self.map);
+
+        // Apply lava damage
+        if self.map.is_lava_at(self.player.pos.x, self.player.pos.y) {
+            self.lava_damage_accumulator += LAVA_DAMAGE_PER_SECOND as f32 * dt;
+            let damage = self.lava_damage_accumulator as i32;
+            if damage > 0 {
+                self.player.take_damage(damage);
+                self.lava_damage_accumulator -= damage as f32;
+            }
+        } else {
+            self.lava_damage_accumulator = 0.0;
+        }
 
         self.update_camera();
 
@@ -173,9 +196,14 @@ impl GameState {
             }
         }
 
-        // Update projectiles
+        // Update projectiles and handle collisions with tiles
         for projectile in &mut self.projectiles {
-            projectile.update(dt, &self.map);
+            if let Some((tile_x, tile_y)) = projectile.update(dt, &self.map) {
+                // Projectile hit a tile - damage it if destructible
+                if self.map.is_destructible_at(tile_x, tile_y) {
+                    self.map.damage_tile(tile_x as usize, tile_y as usize);
+                }
+            }
         }
 
         // Check projectile-bot collisions
@@ -240,6 +268,46 @@ impl GameState {
 
         // Draw HUD (fixed on screen)
         draw_text(&format!("Score: {}", self.score), 10.0, 30.0, 30.0, WHITE);
+
+        // Health bar
+        let health_bar_width = 150.0;
+        let health_bar_height = 16.0;
+        let health_x = 10.0;
+        let health_y = 40.0;
+        let health_pct = self.player.health as f32 / self.player.max_health as f32;
+
+        // Background (empty health)
+        draw_rectangle(
+            health_x,
+            health_y,
+            health_bar_width,
+            health_bar_height,
+            Color::from_rgba(60, 60, 60, 255),
+        );
+        // Filled health
+        let health_color = if health_pct > 0.5 {
+            Color::from_rgba(80, 200, 80, 255)
+        } else if health_pct > 0.25 {
+            Color::from_rgba(200, 200, 80, 255)
+        } else {
+            Color::from_rgba(200, 80, 80, 255)
+        };
+        draw_rectangle(
+            health_x,
+            health_y,
+            health_bar_width * health_pct,
+            health_bar_height,
+            health_color,
+        );
+        // Health text
+        draw_text(
+            &format!("{}/{}", self.player.health, self.player.max_health),
+            health_x + 5.0,
+            health_y + 13.0,
+            16.0,
+            WHITE,
+        );
+
         draw_text(
             &format!(
                 "[{}] {}",
@@ -247,14 +315,14 @@ impl GameState {
                 self.player.weapon().name
             ),
             10.0,
-            60.0,
+            80.0,
             24.0,
             YELLOW,
         );
         draw_text(
             "1:Fist 2:Pistol 3:Shotgun 4:MP 5:Rifle",
             10.0,
-            85.0,
+            105.0,
             16.0,
             GRAY,
         );

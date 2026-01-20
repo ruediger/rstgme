@@ -1,7 +1,7 @@
 use macroquad::prelude::*;
 
 use crate::input::MoveDirection;
-use crate::tile_map::{TILE_SIZE, TileMap};
+use crate::tile_map::{EntityType, TILE_SIZE, TileMap};
 use crate::weapon::Weapon;
 
 const MOVE_SPEED: f32 = 5.0;
@@ -24,12 +24,13 @@ impl Position {
         }
     }
 
-    pub fn update_visual(&mut self, dt: f32) {
+    pub fn update_visual(&mut self, dt: f32, speed_mult: f32) {
         let target_x = self.x as f32;
         let target_y = self.y as f32;
 
-        self.visual_x += (target_x - self.visual_x) * MOVE_SPEED * dt * 10.0;
-        self.visual_y += (target_y - self.visual_y) * MOVE_SPEED * dt * 10.0;
+        let speed = MOVE_SPEED * speed_mult;
+        self.visual_x += (target_x - self.visual_x) * speed * dt * 10.0;
+        self.visual_y += (target_y - self.visual_y) * speed * dt * 10.0;
 
         // Snap if very close
         if (self.visual_x - target_x).abs() < 0.01 {
@@ -52,10 +53,14 @@ impl Position {
     }
 }
 
+const PLAYER_MAX_HEALTH: i32 = 100;
+
 pub struct Player {
     pub pos: Position,
     pub weapons: Vec<Weapon>,
     pub current_weapon: usize,
+    pub health: i32,
+    pub max_health: i32,
     color: Color,
 }
 
@@ -65,8 +70,23 @@ impl Player {
             pos: Position::new(x, y),
             weapons: Weapon::all_weapons(),
             current_weapon: 1, // Start with pistol
+            health: PLAYER_MAX_HEALTH,
+            max_health: PLAYER_MAX_HEALTH,
             color: Color::from_rgba(80, 180, 80, 255),
         }
+    }
+
+    pub fn take_damage(&mut self, amount: i32) {
+        self.health = (self.health - amount).max(0);
+    }
+
+    pub fn is_alive(&self) -> bool {
+        self.health > 0
+    }
+
+    pub fn respawn(&mut self, x: i32, y: i32) {
+        self.pos = Position::new(x, y);
+        self.health = self.max_health;
     }
 
     pub fn weapon(&self) -> &Weapon {
@@ -89,13 +109,14 @@ impl Player {
             let new_x = self.pos.x + input.dx;
             let new_y = self.pos.y + input.dy;
 
-            if map.is_walkable(new_x, new_y) {
+            if map.is_walkable_by(new_x, new_y, EntityType::Player) {
                 self.pos.x = new_x;
                 self.pos.y = new_y;
             }
         }
 
-        self.pos.update_visual(dt);
+        let speed_mult = map.get_speed_at(self.pos.x, self.pos.y);
+        self.pos.update_visual(dt, speed_mult);
         for weapon in &mut self.weapons {
             weapon.update(dt);
         }
@@ -163,13 +184,14 @@ impl Bot {
             let new_x = self.pos.x + dx;
             let new_y = self.pos.y + dy;
 
-            if map.is_walkable(new_x, new_y) {
+            if map.is_walkable_by(new_x, new_y, EntityType::Bot) {
                 self.pos.x = new_x;
                 self.pos.y = new_y;
             }
         }
 
-        self.pos.update_visual(dt);
+        let speed_mult = map.get_speed_at(self.pos.x, self.pos.y);
+        self.pos.update_visual(dt, speed_mult);
     }
 
     pub fn draw(&self, camera_x: f32, camera_y: f32) {
@@ -216,6 +238,33 @@ mod tests {
         let player = Player::new(3, 4);
         assert_eq!(player.pos.x, 3);
         assert_eq!(player.pos.y, 4);
+        assert_eq!(player.health, 100);
+        assert!(player.is_alive());
+    }
+
+    #[test]
+    fn test_player_damage() {
+        let mut player = Player::new(0, 0);
+        player.take_damage(30);
+        assert_eq!(player.health, 70);
+        assert!(player.is_alive());
+
+        player.take_damage(100);
+        assert_eq!(player.health, 0);
+        assert!(!player.is_alive());
+    }
+
+    #[test]
+    fn test_player_respawn() {
+        let mut player = Player::new(0, 0);
+        player.take_damage(100);
+        assert!(!player.is_alive());
+
+        player.respawn(5, 5);
+        assert!(player.is_alive());
+        assert_eq!(player.health, 100);
+        assert_eq!(player.pos.x, 5);
+        assert_eq!(player.pos.y, 5);
     }
 
     #[test]

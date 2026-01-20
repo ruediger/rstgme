@@ -63,9 +63,10 @@ impl Projectile {
         }
     }
 
-    pub fn update(&mut self, dt: f32, map: &TileMap) {
+    /// Update projectile position. Returns Some((x, y)) if hit a blocking tile.
+    pub fn update(&mut self, dt: f32, map: &TileMap) -> Option<(i32, i32)> {
         if !self.alive {
-            return;
+            return None;
         }
 
         self.x += self.dx * self.speed * dt;
@@ -77,16 +78,19 @@ impl Projectile {
         let distance = (dist_x * dist_x + dist_y * dist_y).sqrt();
         if distance > self.max_range {
             self.alive = false;
-            return;
+            return None;
         }
 
-        // Check wall collision
+        // Check tile collision (walls, doors, crates block; pits don't)
         let tile_x = (self.x / TILE_SIZE) as i32;
         let tile_y = (self.y / TILE_SIZE) as i32;
 
-        if !map.is_walkable(tile_x, tile_y) {
+        if map.blocks_projectile_at(tile_x, tile_y) {
             self.alive = false;
+            return Some((tile_x, tile_y));
         }
+
+        None
     }
 
     pub fn draw(&self, camera_x: f32, camera_y: f32) {
