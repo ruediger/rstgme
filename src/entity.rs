@@ -5,7 +5,7 @@ use crate::sprites::{SpriteSheet, direction, movement_to_direction};
 use crate::tile_map::{EntityType, TILE_SIZE, TileMap};
 use crate::weapon::Weapon;
 
-const MOVE_SPEED: f32 = 5.0;
+const MOVE_SPEED: f32 = 1.5;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Position {
