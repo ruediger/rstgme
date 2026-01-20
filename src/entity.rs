@@ -83,11 +83,11 @@ impl Player {
         self.weapon.update(dt);
     }
 
-    pub fn draw(&self) {
+    pub fn draw(&self, camera_x: f32, camera_y: f32) {
         let padding = 2.0;
         draw_rectangle(
-            self.pos.visual_x * TILE_SIZE + padding,
-            self.pos.visual_y * TILE_SIZE + padding,
+            self.pos.visual_x * TILE_SIZE + padding - camera_x,
+            self.pos.visual_y * TILE_SIZE + padding - camera_y,
             TILE_SIZE - padding * 2.0,
             TILE_SIZE - padding * 2.0,
             self.color,
@@ -154,15 +154,15 @@ impl Bot {
         self.pos.update_visual(dt);
     }
 
-    pub fn draw(&self) {
+    pub fn draw(&self, camera_x: f32, camera_y: f32) {
         if !self.alive {
             return;
         }
 
         let padding = 4.0;
         draw_rectangle(
-            self.pos.visual_x * TILE_SIZE + padding,
-            self.pos.visual_y * TILE_SIZE + padding,
+            self.pos.visual_x * TILE_SIZE + padding - camera_x,
+            self.pos.visual_y * TILE_SIZE + padding - camera_y,
             TILE_SIZE - padding * 2.0,
             TILE_SIZE - padding * 2.0,
             self.color,

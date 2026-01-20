@@ -52,12 +52,17 @@ impl Projectile {
         }
     }
 
-    pub fn draw(&self) {
+    pub fn draw(&self, camera_x: f32, camera_y: f32) {
         if !self.alive {
             return;
         }
 
-        draw_circle(self.x, self.y, PROJECTILE_SIZE / 2.0, YELLOW);
+        draw_circle(
+            self.x - camera_x,
+            self.y - camera_y,
+            PROJECTILE_SIZE / 2.0,
+            YELLOW,
+        );
     }
 }
 

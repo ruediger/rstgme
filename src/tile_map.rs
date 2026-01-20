@@ -37,9 +37,7 @@ impl TileMap {
         }
     }
 
-    pub fn create_test_level() -> Self {
-        let width = 20;
-        let height = 15;
+    pub fn create_random(width: usize, height: usize) -> Self {
         let mut map = Self::new(width, height);
 
         // Add walls around the border
@@ -52,12 +50,51 @@ impl TileMap {
             map.set_tile(width - 1, y, TileType::Wall);
         }
 
-        // Add some interior walls
-        for x in 5..10 {
-            map.set_tile(x, 5, TileType::Wall);
+        // Add random wall clusters
+        let num_clusters = (width * height) / 50;
+        for _ in 0..num_clusters {
+            let cx = rand::gen_range(3, width - 3);
+            let cy = rand::gen_range(3, height - 3);
+            let cluster_size = rand::gen_range(2, 6);
+
+            // Create a small cluster of walls
+            for _ in 0..cluster_size {
+                let ox = rand::gen_range(0, 3) as i32 - 1;
+                let oy = rand::gen_range(0, 3) as i32 - 1;
+                let wx = (cx as i32 + ox) as usize;
+                let wy = (cy as i32 + oy) as usize;
+                if wx > 1 && wx < width - 2 && wy > 1 && wy < height - 2 {
+                    map.set_tile(wx, wy, TileType::Wall);
+                }
+            }
         }
-        for y in 8..12 {
-            map.set_tile(12, y, TileType::Wall);
+
+        // Add some horizontal wall segments
+        let num_h_walls = height / 8;
+        for _ in 0..num_h_walls {
+            let y = rand::gen_range(3, height - 3);
+            let x_start = rand::gen_range(2, width / 2);
+            let length = rand::gen_range(4, width / 3);
+            for x in x_start..(x_start + length).min(width - 2) {
+                map.set_tile(x, y, TileType::Wall);
+            }
+            // Leave a gap for passage
+            let gap = rand::gen_range(x_start, (x_start + length).min(width - 2));
+            map.set_tile(gap, y, TileType::Floor);
+        }
+
+        // Add some vertical wall segments
+        let num_v_walls = width / 8;
+        for _ in 0..num_v_walls {
+            let x = rand::gen_range(3, width - 3);
+            let y_start = rand::gen_range(2, height / 2);
+            let length = rand::gen_range(4, height / 3);
+            for y in y_start..(y_start + length).min(height - 2) {
+                map.set_tile(x, y, TileType::Wall);
+            }
+            // Leave a gap for passage
+            let gap = rand::gen_range(y_start, (y_start + length).min(height - 2));
+            map.set_tile(x, gap, TileType::Floor);
         }
 
         map
@@ -82,12 +119,12 @@ impl TileMap {
             .unwrap_or(false)
     }
 
-    pub fn draw(&self) {
+    pub fn draw(&self, camera_x: f32, camera_y: f32) {
         for (y, row) in self.tiles.iter().enumerate() {
             for (x, &tile) in row.iter().enumerate() {
                 draw_rectangle(
-                    x as f32 * TILE_SIZE,
-                    y as f32 * TILE_SIZE,
+                    x as f32 * TILE_SIZE - camera_x,
+                    y as f32 * TILE_SIZE - camera_y,
                     TILE_SIZE,
                     TILE_SIZE,
                     tile.color(),
@@ -109,15 +146,12 @@ mod tests {
 
     #[test]
     fn test_map_boundaries() {
-        let map = TileMap::create_test_level();
-        // Corners should be walls
+        let map = TileMap::create_random(20, 15);
+        // Corners should be walls (border)
         assert!(!map.is_walkable(0, 0));
         assert!(!map.is_walkable(19, 0));
         assert!(!map.is_walkable(0, 14));
         assert!(!map.is_walkable(19, 14));
-        // Interior should be walkable (except where we placed walls)
-        assert!(map.is_walkable(1, 1));
-        assert!(map.is_walkable(2, 2));
     }
 
     #[test]
