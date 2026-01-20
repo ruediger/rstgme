@@ -183,11 +183,13 @@ impl Player {
 pub struct Bot {
     pub pos: Position,
     spawn_pos: Position,
-    facing: u32,
+    pub facing: u32,
     move_timer: f32,
     move_interval: f32,
     pub alive: bool,
     respawn_timer: f32,
+    pub hostile: bool,
+    pub shoot_cooldown: f32,
 }
 
 impl Bot {
@@ -200,6 +202,22 @@ impl Bot {
             move_interval: 0.5 + rand::gen_range(0.0, 0.5),
             alive: true,
             respawn_timer: 0.0,
+            hostile: false,
+            shoot_cooldown: 0.0,
+        }
+    }
+
+    pub fn new_hostile(x: i32, y: i32) -> Self {
+        Self {
+            pos: Position::new(x, y),
+            spawn_pos: Position::new(x, y),
+            facing: direction::DOWN,
+            move_timer: 0.0,
+            move_interval: 0.3 + rand::gen_range(0.0, 0.2), // Faster movement
+            alive: true,
+            respawn_timer: 0.0,
+            hostile: true,
+            shoot_cooldown: rand::gen_range(0.0, 1.0), // Stagger initial shots
         }
     }
 
@@ -208,7 +226,7 @@ impl Bot {
         self.respawn_timer = rand::gen_range(5.0, 15.0);
     }
 
-    pub fn update(&mut self, dt: f32, map: &TileMap) {
+    pub fn update(&mut self, dt: f32, map: &TileMap, player_pos: Option<(i32, i32)>) {
         if !self.alive {
             self.respawn_timer -= dt;
             if self.respawn_timer <= 0.0 {
@@ -218,14 +236,34 @@ impl Bot {
             return;
         }
 
+        // Update shoot cooldown
+        if self.shoot_cooldown > 0.0 {
+            self.shoot_cooldown -= dt;
+        }
+
         self.move_timer += dt;
 
         if self.pos.is_at_target() && self.move_timer >= self.move_interval {
             self.move_timer = 0.0;
 
-            // Random direction
-            let directions = [(0, -1), (0, 1), (-1, 0), (1, 0)];
-            let (dx, dy) = directions[rand::gen_range(0, 4)];
+            let (dx, dy) = if let (true, Some((px, py))) = (self.hostile, player_pos) {
+                // Chase the player
+                let diff_x = px - self.pos.x;
+                let diff_y = py - self.pos.y;
+
+                // Move towards player (prefer larger difference)
+                if diff_x.abs() > diff_y.abs() {
+                    (diff_x.signum(), 0)
+                } else if diff_y != 0 {
+                    (0, diff_y.signum())
+                } else {
+                    (diff_x.signum(), 0)
+                }
+            } else {
+                // Random direction for non-hostile bots
+                let directions = [(0, -1), (0, 1), (-1, 0), (1, 0)];
+                directions[rand::gen_range(0, 4)]
+            };
 
             let new_x = self.pos.x + dx;
             let new_y = self.pos.y + dy;
@@ -243,6 +281,31 @@ impl Bot {
         self.pos.update_visual(dt, speed_mult);
     }
 
+    /// Check if hostile bot can shoot and return target direction if so
+    pub fn try_shoot(&mut self, player_x: i32, player_y: i32) -> Option<(f32, f32)> {
+        if !self.hostile || !self.alive || self.shoot_cooldown > 0.0 {
+            return None;
+        }
+
+        let (bx, by) = (self.pos.x, self.pos.y);
+        let dx = player_x - bx;
+        let dy = player_y - by;
+        let dist_sq = dx * dx + dy * dy;
+
+        // Only shoot if within range (8 tiles) and have line of sight
+        if dist_sq <= 64 {
+            self.shoot_cooldown = 1.5 + rand::gen_range(0.0, 1.0); // 1.5-2.5s between shots
+
+            // Return normalized direction
+            let dist = (dist_sq as f32).sqrt();
+            if dist > 0.0 {
+                return Some((dx as f32 / dist, dy as f32 / dist));
+            }
+        }
+
+        None
+    }
+
     pub fn draw(&self, camera_x: f32, camera_y: f32, sprites: &SpriteSheet) {
         if !self.alive {
             return;
@@ -250,7 +313,14 @@ impl Bot {
 
         let screen_x = self.pos.visual_x * TILE_SIZE - camera_x;
         let screen_y = self.pos.visual_y * TILE_SIZE - camera_y;
-        sprites.draw_bot(screen_x, screen_y, self.facing);
+
+        if self.hostile {
+            // Hostile bots get a red tint
+            let tint = Color::from_rgba(255, 100, 100, 255);
+            sprites.draw_bot_tinted(screen_x, screen_y, self.facing, tint);
+        } else {
+            sprites.draw_bot(screen_x, screen_y, self.facing);
+        }
     }
 }
 

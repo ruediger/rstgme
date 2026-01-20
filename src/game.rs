@@ -8,10 +8,13 @@ use crate::sprites::SpriteSheet;
 use crate::tile_map::{EntityType, TILE_SIZE, TileMap, TileType};
 
 const BOT_HITBOX_SIZE: f32 = TILE_SIZE - 8.0;
+const PLAYER_HITBOX_SIZE: f32 = TILE_SIZE - 8.0;
 const MAP_WIDTH: usize = 60;
 const MAP_HEIGHT: usize = 45;
-const NUM_BOTS: usize = 10;
+const NUM_BOTS: usize = 6;
+const NUM_HOSTILE_BOTS: usize = 4;
 const NUM_FLOOR_ITEMS: usize = 15;
+const BOT_PROJECTILE_DAMAGE: i32 = 10;
 const LAVA_DAMAGE_PER_SECOND: i32 = 25;
 const HEALTH_PACK_AMOUNT: i32 = 25;
 const SPEED_BOOST_DURATION: f32 = 5.0;
@@ -134,10 +137,15 @@ impl GameState {
         let player = Player::new(px, py);
 
         // Add bots at random walkable positions
-        let mut bots = Vec::with_capacity(NUM_BOTS);
+        let mut bots = Vec::with_capacity(NUM_BOTS + NUM_HOSTILE_BOTS);
         for _ in 0..NUM_BOTS {
             let (x, y) = Self::find_walkable_spot(&map);
             bots.push(Bot::new(x, y));
+        }
+        // Add hostile bots
+        for _ in 0..NUM_HOSTILE_BOTS {
+            let (x, y) = Self::find_walkable_spot(&map);
+            bots.push(Bot::new_hostile(x, y));
         }
 
         // Spawn floor items (pistols and health packs)
@@ -259,7 +267,7 @@ impl GameState {
             let proj_dx = angle.cos();
             let proj_dy = angle.sin();
 
-            let projectile = Projectile::new_with_direction(px, py, proj_dx, proj_dy, speed, range);
+            let projectile = Projectile::new_player(px, py, proj_dx, proj_dy, speed, range);
             self.projectiles.push(projectile);
         }
     }
@@ -348,9 +356,9 @@ impl GameState {
             }
         }
 
-        // Check projectile-bot collisions
+        // Check projectile-bot collisions (only player projectiles hit bots)
         for projectile in &mut self.projectiles {
-            if !projectile.alive {
+            if !projectile.alive || !projectile.from_player {
                 continue;
             }
             for bot in &mut self.bots {
@@ -408,8 +416,44 @@ impl GameState {
         }
         self.items.retain(|i| i.alive);
 
+        let player_pos = Some((self.player.pos.x, self.player.pos.y));
         for bot in &mut self.bots {
-            bot.update(dt, &self.map);
+            bot.update(dt, &self.map, player_pos);
+
+            // Check if hostile bot wants to shoot
+            if let Some((dx, dy)) = bot.try_shoot(self.player.pos.x, self.player.pos.y) {
+                let (bx, by) = bot.pos.center_pixel();
+                let projectile = Projectile::new_bot(
+                    bx,
+                    by,
+                    dx,
+                    dy,
+                    300.0,            // Bot projectile speed
+                    TILE_SIZE * 10.0, // Bot projectile range
+                );
+                self.projectiles.push(projectile);
+            }
+        }
+
+        // Check projectile-player collision (only bot projectiles hit player)
+        let (px, py) = self.player.pos.center_pixel();
+        let half_size = PLAYER_HITBOX_SIZE / 2.0;
+        for projectile in &mut self.projectiles {
+            if !projectile.alive || projectile.from_player {
+                continue;
+            }
+            if projectile.x >= px - half_size
+                && projectile.x <= px + half_size
+                && projectile.y >= py - half_size
+                && projectile.y <= py + half_size
+            {
+                projectile.alive = false;
+                let prev_health = self.player.health;
+                self.player.take_damage(BOT_PROJECTILE_DAMAGE);
+                if self.player.health < prev_health && self.damage_flash_timer <= 0.0 {
+                    self.damage_flash_timer = DAMAGE_FLASH_DURATION;
+                }
+            }
         }
     }
 

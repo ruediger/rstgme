@@ -163,6 +163,21 @@ impl SpriteSheet {
         );
     }
 
+    /// Draw bot with a color tint (for hostile bots)
+    pub fn draw_bot_tinted(&self, x: f32, y: f32, direction: u32, tint: Color) {
+        let src = self.bot_rect(direction);
+        draw_texture_ex(
+            &self.texture,
+            x,
+            y,
+            tint,
+            DrawTextureParams {
+                source: Some(src),
+                ..Default::default()
+            },
+        );
+    }
+
     /// Draw item at the given screen position (centered)
     pub fn draw_item(&self, index: u32, x: f32, y: f32) {
         let src = self.item_rect(index);

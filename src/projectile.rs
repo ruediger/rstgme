@@ -11,6 +11,7 @@ pub struct Projectile {
     speed: f32,
     max_range: f32,
     pub alive: bool,
+    pub from_player: bool,
 }
 
 impl Projectile {
@@ -36,17 +37,11 @@ impl Projectile {
             speed,
             max_range,
             alive: true,
+            from_player: true,
         }
     }
 
-    pub fn new_with_direction(
-        x: f32,
-        y: f32,
-        dx: f32,
-        dy: f32,
-        speed: f32,
-        max_range: f32,
-    ) -> Self {
+    pub fn new_player(x: f32, y: f32, dx: f32, dy: f32, speed: f32, max_range: f32) -> Self {
         Self {
             x,
             y,
@@ -57,6 +52,22 @@ impl Projectile {
             speed,
             max_range,
             alive: true,
+            from_player: true,
+        }
+    }
+
+    pub fn new_bot(x: f32, y: f32, dx: f32, dy: f32, speed: f32, max_range: f32) -> Self {
+        Self {
+            x,
+            y,
+            start_x: x,
+            start_y: y,
+            dx,
+            dy,
+            speed,
+            max_range,
+            alive: true,
+            from_player: false,
         }
     }
 

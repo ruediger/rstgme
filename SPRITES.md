@@ -79,7 +79,7 @@ There should be rotated versions of these entities with 45 degree rotations.
 +------------------------------------------------------------------+
 ```
 
-**Recommended PNG size**: 352 × 160 pixels
+**Recommended PNG size**: 384 × 160 pixels
 
 ---
 
