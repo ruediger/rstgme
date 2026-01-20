@@ -39,6 +39,22 @@ pub fn is_shooting() -> bool {
     is_mouse_button_down(MouseButton::Left)
 }
 
+pub fn get_weapon_switch() -> Option<usize> {
+    if is_key_pressed(KeyCode::Key1) {
+        Some(0)
+    } else if is_key_pressed(KeyCode::Key2) {
+        Some(1)
+    } else if is_key_pressed(KeyCode::Key3) {
+        Some(2)
+    } else if is_key_pressed(KeyCode::Key4) {
+        Some(3)
+    } else if is_key_pressed(KeyCode::Key5) {
+        Some(4)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

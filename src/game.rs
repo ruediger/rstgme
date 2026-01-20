@@ -1,7 +1,7 @@
 use macroquad::prelude::*;
 
 use crate::entity::{Bot, Player};
-use crate::input::{get_mouse_position, get_player_input, is_shooting};
+use crate::input::{get_mouse_position, get_player_input, get_weapon_switch, is_shooting};
 use crate::projectile::Projectile;
 use crate::tile_map::{TILE_SIZE, TileMap};
 
@@ -72,23 +72,104 @@ impl GameState {
         self.camera_y = target_y.clamp(0.0, max_y);
     }
 
+    fn handle_melee_attack(&mut self, target_x: f32, target_y: f32) {
+        let (px, py) = self.player.pos.center_pixel();
+        let range = self.player.weapon().range;
+
+        // Direction to target
+        let dx = target_x - px;
+        let dy = target_y - py;
+        let len = (dx * dx + dy * dy).sqrt();
+        if len == 0.0 {
+            return;
+        }
+        let dx = dx / len;
+        let dy = dy / len;
+
+        // Check bots in melee range in the direction of attack
+        for bot in &mut self.bots {
+            if !bot.alive {
+                continue;
+            }
+            let (bx, by) = bot.pos.center_pixel();
+
+            // Vector from player to bot
+            let to_bot_x = bx - px;
+            let to_bot_y = by - py;
+            let dist = (to_bot_x * to_bot_x + to_bot_y * to_bot_y).sqrt();
+
+            if dist > range {
+                continue;
+            }
+
+            // Check if bot is roughly in the direction of attack
+            let dot = (to_bot_x * dx + to_bot_y * dy) / dist;
+            if dot > 0.5 {
+                bot.kill();
+                self.score += 1;
+            }
+        }
+    }
+
+    fn create_projectiles(&mut self, target_x: f32, target_y: f32) {
+        let (px, py) = self.player.pos.center_pixel();
+        let weapon = self.player.weapon();
+
+        // Calculate base direction
+        let dx = target_x - px;
+        let dy = target_y - py;
+        let base_angle = dy.atan2(dx);
+
+        let pellets = weapon.pellets.max(1);
+        let spread = weapon.spread;
+        let speed = weapon.bullet_speed;
+        let range = weapon.range;
+
+        for i in 0..pellets {
+            // Calculate spread angle for this pellet
+            let angle_offset = if pellets > 1 {
+                let spread_range = spread * 2.0;
+                -spread + spread_range * (i as f32 / (pellets - 1) as f32)
+            } else if spread > 0.0 {
+                // Single pellet with spread (machine pistol) - random spread
+                rand::gen_range(-spread, spread)
+            } else {
+                0.0
+            };
+
+            let angle = base_angle + angle_offset;
+            let proj_dx = angle.cos();
+            let proj_dy = angle.sin();
+
+            let projectile = Projectile::new_with_direction(px, py, proj_dx, proj_dy, speed, range);
+            self.projectiles.push(projectile);
+        }
+    }
+
     pub fn update(&mut self, dt: f32) {
+        // Handle weapon switching
+        if let Some(weapon_index) = get_weapon_switch() {
+            self.player.switch_weapon(weapon_index);
+        }
+
         let input = get_player_input();
         self.player.update(dt, input, &self.map);
 
         self.update_camera();
 
         // Handle shooting - convert screen mouse pos to world pos
-        if is_shooting() && self.player.weapon.can_fire() {
-            let (px, py) = self.player.pos.center_pixel();
+        if is_shooting() && self.player.weapon().can_fire() {
             let (mx, my) = get_mouse_position();
             let world_mx = mx + self.camera_x;
             let world_my = my + self.camera_y;
 
-            self.player.weapon.fire();
-            let projectile =
-                Projectile::new(px, py, world_mx, world_my, self.player.weapon.bullet_speed);
-            self.projectiles.push(projectile);
+            self.player.weapon_mut().fire();
+
+            if self.player.weapon().is_melee {
+                self.handle_melee_attack(world_mx, world_my);
+            } else {
+                self.create_projectiles(world_mx, world_my);
+            }
         }
 
         // Update projectiles
@@ -156,8 +237,26 @@ impl GameState {
             projectile.draw(self.camera_x, self.camera_y);
         }
 
-        // Draw score (fixed on screen)
+        // Draw HUD (fixed on screen)
         draw_text(&format!("Score: {}", self.score), 10.0, 30.0, 30.0, WHITE);
+        draw_text(
+            &format!(
+                "[{}] {}",
+                self.player.current_weapon + 1,
+                self.player.weapon().name
+            ),
+            10.0,
+            60.0,
+            24.0,
+            YELLOW,
+        );
+        draw_text(
+            "1:Fist 2:Pistol 3:Shotgun 4:MP 5:Rifle",
+            10.0,
+            85.0,
+            16.0,
+            GRAY,
+        );
     }
 }
 

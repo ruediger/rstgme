@@ -54,7 +54,8 @@ impl Position {
 
 pub struct Player {
     pub pos: Position,
-    pub weapon: Weapon,
+    pub weapons: Vec<Weapon>,
+    pub current_weapon: usize,
     color: Color,
 }
 
@@ -62,8 +63,23 @@ impl Player {
     pub fn new(x: i32, y: i32) -> Self {
         Self {
             pos: Position::new(x, y),
-            weapon: Weapon::pistol(),
+            weapons: Weapon::all_weapons(),
+            current_weapon: 1, // Start with pistol
             color: Color::from_rgba(80, 180, 80, 255),
+        }
+    }
+
+    pub fn weapon(&self) -> &Weapon {
+        &self.weapons[self.current_weapon]
+    }
+
+    pub fn weapon_mut(&mut self) -> &mut Weapon {
+        &mut self.weapons[self.current_weapon]
+    }
+
+    pub fn switch_weapon(&mut self, index: usize) {
+        if index < self.weapons.len() {
+            self.current_weapon = index;
         }
     }
 
@@ -80,7 +96,9 @@ impl Player {
         }
 
         self.pos.update_visual(dt);
-        self.weapon.update(dt);
+        for weapon in &mut self.weapons {
+            weapon.update(dt);
+        }
     }
 
     pub fn draw(&self, camera_x: f32, camera_y: f32) {
