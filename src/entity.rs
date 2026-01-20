@@ -97,22 +97,42 @@ impl Player {
 
 pub struct Bot {
     pub pos: Position,
+    spawn_pos: Position,
     color: Color,
     move_timer: f32,
     move_interval: f32,
+    pub alive: bool,
+    respawn_timer: f32,
 }
 
 impl Bot {
     pub fn new(x: i32, y: i32) -> Self {
         Self {
             pos: Position::new(x, y),
+            spawn_pos: Position::new(x, y),
             color: Color::from_rgba(180, 80, 80, 255),
             move_timer: 0.0,
             move_interval: 0.5 + rand::gen_range(0.0, 0.5),
+            alive: true,
+            respawn_timer: 0.0,
         }
     }
 
+    pub fn kill(&mut self) {
+        self.alive = false;
+        self.respawn_timer = rand::gen_range(5.0, 15.0);
+    }
+
     pub fn update(&mut self, dt: f32, map: &TileMap) {
+        if !self.alive {
+            self.respawn_timer -= dt;
+            if self.respawn_timer <= 0.0 {
+                self.alive = true;
+                self.pos = self.spawn_pos;
+            }
+            return;
+        }
+
         self.move_timer += dt;
 
         if self.pos.is_at_target() && self.move_timer >= self.move_interval {
@@ -135,6 +155,10 @@ impl Bot {
     }
 
     pub fn draw(&self) {
+        if !self.alive {
+            return;
+        }
+
         let padding = 4.0;
         draw_rectangle(
             self.pos.visual_x * TILE_SIZE + padding,

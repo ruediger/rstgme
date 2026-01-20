@@ -3,13 +3,16 @@ use macroquad::prelude::*;
 use crate::entity::{Bot, Player};
 use crate::input::{get_mouse_position, get_player_input, is_shooting};
 use crate::projectile::Projectile;
-use crate::tile_map::TileMap;
+use crate::tile_map::{TILE_SIZE, TileMap};
+
+const BOT_HITBOX_SIZE: f32 = TILE_SIZE - 8.0;
 
 pub struct GameState {
     map: TileMap,
     player: Player,
     bots: Vec<Bot>,
     projectiles: Vec<Projectile>,
+    score: u32,
 }
 
 impl GameState {
@@ -27,6 +30,7 @@ impl GameState {
             player,
             bots,
             projectiles: Vec::new(),
+            score: 0,
         }
     }
 
@@ -47,6 +51,29 @@ impl GameState {
         // Update projectiles
         for projectile in &mut self.projectiles {
             projectile.update(dt, &self.map);
+        }
+
+        // Check projectile-bot collisions
+        for projectile in &mut self.projectiles {
+            if !projectile.alive {
+                continue;
+            }
+            for bot in &mut self.bots {
+                if !bot.alive {
+                    continue;
+                }
+                let (bx, by) = bot.pos.center_pixel();
+                let half_size = BOT_HITBOX_SIZE / 2.0;
+                if projectile.x >= bx - half_size
+                    && projectile.x <= bx + half_size
+                    && projectile.y >= by - half_size
+                    && projectile.y <= by + half_size
+                {
+                    projectile.alive = false;
+                    bot.kill();
+                    self.score += 1;
+                }
+            }
         }
 
         // Remove dead projectiles
@@ -76,6 +103,9 @@ impl GameState {
         for projectile in &self.projectiles {
             projectile.draw();
         }
+
+        // Draw score
+        draw_text(&format!("Score: {}", self.score), 10.0, 30.0, 30.0, WHITE);
     }
 }
 
