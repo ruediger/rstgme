@@ -4,6 +4,7 @@ use crate::entity::{Bot, Player};
 use crate::input::{get_mouse_position, get_player_input, get_weapon_switch, is_shooting};
 use crate::item::{Item, ItemType};
 use crate::projectile::Projectile;
+use crate::sprites::SpriteSheet;
 use crate::tile_map::{EntityType, TILE_SIZE, TileMap, TileType};
 
 const BOT_HITBOX_SIZE: f32 = TILE_SIZE - 8.0;
@@ -398,10 +399,10 @@ impl GameState {
         }
     }
 
-    pub fn draw(&self) {
+    pub fn draw(&self, sprites: &SpriteSheet) {
         clear_background(Color::from_rgba(30, 30, 40, 255));
 
-        self.map.draw(self.camera_x, self.camera_y);
+        self.map.draw(self.camera_x, self.camera_y, sprites);
 
         // Draw aim line (in screen space)
         let (px, py) = self.player.pos.center_pixel();
@@ -417,14 +418,14 @@ impl GameState {
             Color::from_rgba(255, 255, 255, 80),
         );
 
-        self.player.draw(self.camera_x, self.camera_y);
+        self.player.draw(self.camera_x, self.camera_y, sprites);
 
         for bot in &self.bots {
-            bot.draw(self.camera_x, self.camera_y);
+            bot.draw(self.camera_x, self.camera_y, sprites);
         }
 
         for projectile in &self.projectiles {
-            projectile.draw(self.camera_x, self.camera_y);
+            projectile.draw(self.camera_x, self.camera_y, sprites);
         }
 
         for swing in &self.melee_swings {
@@ -433,7 +434,7 @@ impl GameState {
 
         // Draw items
         for item in &self.items {
-            item.draw(self.camera_x, self.camera_y);
+            item.draw(self.camera_x, self.camera_y, sprites);
         }
 
         // Draw HUD (fixed on screen)

@@ -1,8 +1,5 @@
-use macroquad::prelude::*;
-
+use crate::sprites::SpriteSheet;
 use crate::tile_map::{TILE_SIZE, TileMap};
-
-const PROJECTILE_SIZE: f32 = 6.0;
 
 pub struct Projectile {
     pub x: f32,
@@ -93,17 +90,14 @@ impl Projectile {
         None
     }
 
-    pub fn draw(&self, camera_x: f32, camera_y: f32) {
+    pub fn draw(&self, camera_x: f32, camera_y: f32, sprites: &SpriteSheet) {
         if !self.alive {
             return;
         }
 
-        draw_circle(
-            self.x - camera_x,
-            self.y - camera_y,
-            PROJECTILE_SIZE / 2.0,
-            YELLOW,
-        );
+        let screen_x = self.x - camera_x;
+        let screen_y = self.y - camera_y;
+        sprites.draw_bullet(screen_x, screen_y);
     }
 }
 

@@ -1,6 +1,8 @@
 use macroquad::prelude::*;
 use std::collections::HashMap;
 
+use crate::sprites::{SpriteSheet, tiles};
+
 pub const TILE_SIZE: f32 = 32.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -69,19 +71,19 @@ impl TileType {
         }
     }
 
-    fn color(self) -> Color {
+    fn sprite_index(self) -> u32 {
         match self {
-            TileType::Floor => Color::from_rgba(60, 60, 80, 255),
-            TileType::Wall => Color::from_rgba(100, 80, 60, 255),
-            TileType::Sand => Color::from_rgba(194, 178, 128, 255),
-            TileType::Water => Color::from_rgba(64, 104, 164, 255),
-            TileType::Lava => Color::from_rgba(207, 87, 60, 255),
-            TileType::Pit => Color::from_rgba(20, 20, 30, 255),
-            TileType::DoorPlayer => Color::from_rgba(60, 120, 60, 255),
-            TileType::DoorBot => Color::from_rgba(120, 60, 60, 255),
-            TileType::DoorBoth => Color::from_rgba(120, 100, 60, 255),
-            TileType::Crate => Color::from_rgba(139, 90, 43, 255),
-            TileType::WallDestructible => Color::from_rgba(120, 100, 80, 255),
+            TileType::Floor => tiles::FLOOR,
+            TileType::Wall => tiles::WALL,
+            TileType::Sand => tiles::SAND,
+            TileType::Water => tiles::WATER,
+            TileType::Lava => tiles::LAVA,
+            TileType::Pit => tiles::PIT,
+            TileType::DoorPlayer => tiles::DOOR_PLAYER,
+            TileType::DoorBot => tiles::DOOR_BOT,
+            TileType::DoorBoth => tiles::DOOR_BOTH,
+            TileType::Crate => tiles::CRATE,
+            TileType::WallDestructible => tiles::WALL_DESTRUCTIBLE,
         }
     }
 }
@@ -346,10 +348,12 @@ impl TileMap {
         self.get_tile(x as usize, y as usize) == Some(TileType::Lava)
     }
 
-    pub fn draw(&self, camera_x: f32, camera_y: f32) {
+    pub fn draw(&self, camera_x: f32, camera_y: f32, sprites: &SpriteSheet) {
         for (y, row) in self.tiles.iter().enumerate() {
             for (x, &tile) in row.iter().enumerate() {
-                let mut color = tile.color();
+                let screen_x = x as f32 * TILE_SIZE - camera_x;
+                let screen_y = y as f32 * TILE_SIZE - camera_y;
+                let sprite_idx = tile.sprite_index();
 
                 // Show damage on destructible tiles
                 if tile.is_destructible()
@@ -357,21 +361,14 @@ impl TileMap {
                 {
                     let max = tile.max_health();
                     if health < max {
-                        // Darken based on damage
-                        let factor = health as f32 / max as f32;
-                        color.r *= 0.5 + 0.5 * factor;
-                        color.g *= 0.5 + 0.5 * factor;
-                        color.b *= 0.5 + 0.5 * factor;
+                        let damage_factor = 1.0 - (health as f32 / max as f32);
+                        sprites.draw_tile_damaged(sprite_idx, screen_x, screen_y, damage_factor);
+                    } else {
+                        sprites.draw_tile(sprite_idx, screen_x, screen_y);
                     }
+                } else {
+                    sprites.draw_tile(sprite_idx, screen_x, screen_y);
                 }
-
-                draw_rectangle(
-                    x as f32 * TILE_SIZE - camera_x,
-                    y as f32 * TILE_SIZE - camera_y,
-                    TILE_SIZE,
-                    TILE_SIZE,
-                    color,
-                );
             }
         }
     }

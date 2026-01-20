@@ -1,6 +1,7 @@
 use macroquad::prelude::*;
 
 use crate::input::MoveDirection;
+use crate::sprites::{SpriteSheet, direction, movement_to_direction};
 use crate::tile_map::{EntityType, TILE_SIZE, TileMap};
 use crate::weapon::Weapon;
 
@@ -63,7 +64,7 @@ pub struct Player {
     pub max_health: i32,
     pub speed_boost_timer: f32,
     pub invulnerability_timer: f32,
-    color: Color,
+    facing: u32,
 }
 
 impl Player {
@@ -76,7 +77,7 @@ impl Player {
             max_health: PLAYER_MAX_HEALTH,
             speed_boost_timer: 0.0,
             invulnerability_timer: 0.0,
-            color: Color::from_rgba(80, 180, 80, 255),
+            facing: direction::DOWN,
         }
     }
 
@@ -151,6 +152,9 @@ impl Player {
             let new_x = self.pos.x + input.dx;
             let new_y = self.pos.y + input.dy;
 
+            // Update facing direction
+            self.facing = movement_to_direction(input.dx, input.dy);
+
             if map.is_walkable_by(new_x, new_y, EntityType::Player) {
                 self.pos.x = new_x;
                 self.pos.y = new_y;
@@ -169,22 +173,17 @@ impl Player {
         }
     }
 
-    pub fn draw(&self, camera_x: f32, camera_y: f32) {
-        let padding = 2.0;
-        draw_rectangle(
-            self.pos.visual_x * TILE_SIZE + padding - camera_x,
-            self.pos.visual_y * TILE_SIZE + padding - camera_y,
-            TILE_SIZE - padding * 2.0,
-            TILE_SIZE - padding * 2.0,
-            self.color,
-        );
+    pub fn draw(&self, camera_x: f32, camera_y: f32, sprites: &SpriteSheet) {
+        let screen_x = self.pos.visual_x * TILE_SIZE - camera_x;
+        let screen_y = self.pos.visual_y * TILE_SIZE - camera_y;
+        sprites.draw_player(screen_x, screen_y, self.facing);
     }
 }
 
 pub struct Bot {
     pub pos: Position,
     spawn_pos: Position,
-    color: Color,
+    facing: u32,
     move_timer: f32,
     move_interval: f32,
     pub alive: bool,
@@ -196,7 +195,7 @@ impl Bot {
         Self {
             pos: Position::new(x, y),
             spawn_pos: Position::new(x, y),
-            color: Color::from_rgba(180, 80, 80, 255),
+            facing: direction::DOWN,
             move_timer: 0.0,
             move_interval: 0.5 + rand::gen_range(0.0, 0.5),
             alive: true,
@@ -231,6 +230,9 @@ impl Bot {
             let new_x = self.pos.x + dx;
             let new_y = self.pos.y + dy;
 
+            // Update facing direction
+            self.facing = movement_to_direction(dx, dy);
+
             if map.is_walkable_by(new_x, new_y, EntityType::Bot) {
                 self.pos.x = new_x;
                 self.pos.y = new_y;
@@ -241,19 +243,14 @@ impl Bot {
         self.pos.update_visual(dt, speed_mult);
     }
 
-    pub fn draw(&self, camera_x: f32, camera_y: f32) {
+    pub fn draw(&self, camera_x: f32, camera_y: f32, sprites: &SpriteSheet) {
         if !self.alive {
             return;
         }
 
-        let padding = 4.0;
-        draw_rectangle(
-            self.pos.visual_x * TILE_SIZE + padding - camera_x,
-            self.pos.visual_y * TILE_SIZE + padding - camera_y,
-            TILE_SIZE - padding * 2.0,
-            TILE_SIZE - padding * 2.0,
-            self.color,
-        );
+        let screen_x = self.pos.visual_x * TILE_SIZE - camera_x;
+        let screen_y = self.pos.visual_y * TILE_SIZE - camera_y;
+        sprites.draw_bot(screen_x, screen_y, self.facing);
     }
 }
 

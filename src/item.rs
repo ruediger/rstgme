@@ -1,5 +1,6 @@
-use macroquad::prelude::*;
+use macroquad::rand;
 
+use crate::sprites::{SpriteSheet, items};
 use crate::tile_map::TILE_SIZE;
 use crate::weapon::Weapon;
 
@@ -41,15 +42,15 @@ pub enum ItemType {
 }
 
 impl ItemType {
-    fn color(self) -> Color {
+    fn sprite_index(self) -> u32 {
         match self {
-            ItemType::Weapon(WeaponKind::Pistol) => Color::from_rgba(180, 180, 180, 255),
-            ItemType::Weapon(WeaponKind::Shotgun) => Color::from_rgba(139, 90, 43, 255),
-            ItemType::Weapon(WeaponKind::MachinePistol) => Color::from_rgba(100, 100, 120, 255),
-            ItemType::Weapon(WeaponKind::Rifle) => Color::from_rgba(60, 80, 60, 255),
-            ItemType::HealthPack => Color::from_rgba(220, 60, 60, 255),
-            ItemType::SpeedBoost => Color::from_rgba(60, 150, 220, 255),
-            ItemType::Invulnerability => Color::from_rgba(220, 200, 60, 255),
+            ItemType::Weapon(WeaponKind::Pistol) => items::PISTOL,
+            ItemType::Weapon(WeaponKind::Shotgun) => items::SHOTGUN,
+            ItemType::Weapon(WeaponKind::MachinePistol) => items::MACHINE_PISTOL,
+            ItemType::Weapon(WeaponKind::Rifle) => items::RIFLE,
+            ItemType::HealthPack => items::HEALTH_PACK,
+            ItemType::SpeedBoost => items::SPEED_BOOST,
+            ItemType::Invulnerability => items::INVULNERABILITY,
         }
     }
 }
@@ -123,61 +124,15 @@ impl Item {
         Some(Self::new(tile_x, tile_y, item_type))
     }
 
-    pub fn draw(&self, camera_x: f32, camera_y: f32) {
+    pub fn draw(&self, camera_x: f32, camera_y: f32, sprites: &SpriteSheet) {
         if !self.alive {
             return;
         }
 
         let screen_x = self.x - camera_x;
         let screen_y = self.y - camera_y;
-        let size = 12.0;
-        let half = size / 2.0;
-
-        let color = self.item_type.color();
-
-        match self.item_type {
-            ItemType::Weapon(_) => {
-                // Draw weapon as a small square
-                draw_rectangle(screen_x - half, screen_y - half, size, size, color);
-                // Add a small highlight
-                draw_rectangle(
-                    screen_x - half + 2.0,
-                    screen_y - half + 2.0,
-                    4.0,
-                    4.0,
-                    Color::from_rgba(255, 255, 255, 100),
-                );
-            }
-            ItemType::HealthPack => {
-                // Draw as a cross
-                draw_rectangle(screen_x - half, screen_y - 2.0, size, 4.0, color);
-                draw_rectangle(screen_x - 2.0, screen_y - half, 4.0, size, color);
-            }
-            ItemType::SpeedBoost => {
-                // Draw as a diamond
-                let points = [
-                    (screen_x, screen_y - half),
-                    (screen_x + half, screen_y),
-                    (screen_x, screen_y + half),
-                    (screen_x - half, screen_y),
-                ];
-                for i in 0..4 {
-                    let (x1, y1) = points[i];
-                    let (x2, y2) = points[(i + 1) % 4];
-                    draw_line(x1, y1, x2, y2, 2.0, color);
-                }
-            }
-            ItemType::Invulnerability => {
-                // Draw as a star/shield shape
-                draw_circle(screen_x, screen_y, half, color);
-                draw_circle(
-                    screen_x,
-                    screen_y,
-                    half - 3.0,
-                    Color::from_rgba(255, 255, 200, 255),
-                );
-            }
-        }
+        let sprite_idx = self.item_type.sprite_index();
+        sprites.draw_item(sprite_idx, screen_x, screen_y);
     }
 }
 
