@@ -17,6 +17,7 @@ Use `cargo fmt` to keep code formatted and `cargo clippy` to lint the code.
 - `input.rs` - Keyboard (WASD/arrows) and mouse input
 - `weapon.rs` - Weapon struct with fire rate, cooldown, bullet speed
 - `projectile.rs` - Projectile movement and wall collision
+- `item.rs` - Item pickups (weapons, health packs, buffs)
 
 ## Architecture Notes
 
@@ -38,12 +39,17 @@ Use `cargo fmt` to keep code formatted and `cargo clippy` to lint the code.
 - Large random map (60x45) with camera following player
 - Mouse aiming with visual aim line
 - Shooting with left mouse button
+- Melee attack animation (knife swing arc)
 - Projectile-bot collision with score tracking
 - Multiple weapons (1-5 keys): Knife, Pistol, Shotgun, Machine Pistol, Rifle
 - Extended tile system with different behaviors
 - Player health system (100 HP, respawn on death)
 - Lava deals 25 damage per second
 - Health bar in HUD (green/yellow/red based on health)
+- Item pickup system (weapons, health packs, buffs)
+- Items spawn on floor and drop from destroyed crates/walls
+- Speed boost (5s, 2x speed + lava immunity)
+- Invulnerability (3s, no damage)
 
 ## Tile Types
 
@@ -61,9 +67,22 @@ Use `cargo fmt` to keep code formatted and `cargo clippy` to lint the code.
 | Crate | None | - | Block | 1 hit |
 | WallDestructible | None | - | Block | 3 hits |
 
+## Item Types
+
+| Item | Effect | Spawn Location |
+|------|--------|----------------|
+| Pistol | Adds weapon | Floor, Crates |
+| Shotgun | Adds weapon | Crates, Walls |
+| Machine Pistol | Adds weapon | Crates, Walls |
+| Rifle | Adds weapon | Walls only |
+| HealthPack | +25 HP | Floor, Crates |
+| SpeedBoost | 2x speed + lava immunity 5s | Crates |
+| Invulnerability | No damage 3s | Walls |
+
 ## TODO / Future
 
 - Bot AI (chase player, shoot back)
+- Ammunition system
 - Keycards for doors
 - Graphics/sprites
 - Online multiplayer

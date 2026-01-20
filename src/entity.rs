@@ -61,6 +61,8 @@ pub struct Player {
     pub current_weapon: usize,
     pub health: i32,
     pub max_health: i32,
+    pub speed_boost_timer: f32,
+    pub invulnerability_timer: f32,
     color: Color,
 }
 
@@ -68,25 +70,57 @@ impl Player {
     pub fn new(x: i32, y: i32) -> Self {
         Self {
             pos: Position::new(x, y),
-            weapons: Weapon::all_weapons(),
-            current_weapon: 1, // Start with pistol
+            weapons: vec![Weapon::knife()], // Start with only knife
+            current_weapon: 0,
             health: PLAYER_MAX_HEALTH,
             max_health: PLAYER_MAX_HEALTH,
+            speed_boost_timer: 0.0,
+            invulnerability_timer: 0.0,
             color: Color::from_rgba(80, 180, 80, 255),
         }
     }
 
     pub fn take_damage(&mut self, amount: i32) {
+        // Invulnerability prevents all damage
+        if self.invulnerability_timer > 0.0 {
+            return;
+        }
         self.health = (self.health - amount).max(0);
+    }
+
+    pub fn heal(&mut self, amount: i32) {
+        self.health = (self.health + amount).min(self.max_health);
     }
 
     pub fn is_alive(&self) -> bool {
         self.health > 0
     }
 
+    #[allow(dead_code)]
+    pub fn is_invulnerable(&self) -> bool {
+        self.invulnerability_timer > 0.0
+    }
+
+    #[allow(dead_code)]
+    pub fn has_speed_boost(&self) -> bool {
+        self.speed_boost_timer > 0.0
+    }
+
     pub fn respawn(&mut self, x: i32, y: i32) {
         self.pos = Position::new(x, y);
         self.health = self.max_health;
+        self.speed_boost_timer = 0.0;
+        self.invulnerability_timer = 0.0;
+    }
+
+    pub fn has_weapon(&self, name: &str) -> bool {
+        self.weapons.iter().any(|w| w.name == name)
+    }
+
+    pub fn add_weapon(&mut self, weapon: Weapon) {
+        if !self.has_weapon(weapon.name) {
+            self.weapons.push(weapon);
+        }
     }
 
     pub fn weapon(&self) -> &Weapon {
@@ -104,6 +138,14 @@ impl Player {
     }
 
     pub fn update(&mut self, dt: f32, input: MoveDirection, map: &TileMap) {
+        // Update buff timers
+        if self.speed_boost_timer > 0.0 {
+            self.speed_boost_timer -= dt;
+        }
+        if self.invulnerability_timer > 0.0 {
+            self.invulnerability_timer -= dt;
+        }
+
         // Only allow new movement when at target position
         if self.pos.is_at_target() && input.is_moving() {
             let new_x = self.pos.x + input.dx;
@@ -115,8 +157,13 @@ impl Player {
             }
         }
 
-        let speed_mult = map.get_speed_at(self.pos.x, self.pos.y);
+        // Apply speed multiplier (tile speed * boost)
+        let mut speed_mult = map.get_speed_at(self.pos.x, self.pos.y);
+        if self.speed_boost_timer > 0.0 {
+            speed_mult *= 2.0;
+        }
         self.pos.update_visual(dt, speed_mult);
+
         for weapon in &mut self.weapons {
             weapon.update(dt);
         }
@@ -240,6 +287,9 @@ mod tests {
         assert_eq!(player.pos.y, 4);
         assert_eq!(player.health, 100);
         assert!(player.is_alive());
+        // Player starts with only knife
+        assert_eq!(player.weapons.len(), 1);
+        assert_eq!(player.weapons[0].name, "Knife");
     }
 
     #[test]
@@ -252,6 +302,30 @@ mod tests {
         player.take_damage(100);
         assert_eq!(player.health, 0);
         assert!(!player.is_alive());
+    }
+
+    #[test]
+    fn test_player_invulnerability() {
+        let mut player = Player::new(0, 0);
+        player.invulnerability_timer = 3.0;
+
+        player.take_damage(50);
+        assert_eq!(player.health, 100); // No damage taken
+        assert!(player.is_invulnerable());
+    }
+
+    #[test]
+    fn test_player_add_weapon() {
+        let mut player = Player::new(0, 0);
+        assert!(!player.has_weapon("Pistol"));
+
+        player.add_weapon(Weapon::pistol());
+        assert!(player.has_weapon("Pistol"));
+        assert_eq!(player.weapons.len(), 2);
+
+        // Adding same weapon again should not duplicate
+        player.add_weapon(Weapon::pistol());
+        assert_eq!(player.weapons.len(), 2);
     }
 
     #[test]

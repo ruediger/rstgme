@@ -2,14 +2,19 @@ use macroquad::prelude::*;
 
 use crate::entity::{Bot, Player};
 use crate::input::{get_mouse_position, get_player_input, get_weapon_switch, is_shooting};
+use crate::item::{Item, ItemType};
 use crate::projectile::Projectile;
-use crate::tile_map::{EntityType, TILE_SIZE, TileMap};
+use crate::tile_map::{EntityType, TILE_SIZE, TileMap, TileType};
 
 const BOT_HITBOX_SIZE: f32 = TILE_SIZE - 8.0;
 const MAP_WIDTH: usize = 60;
 const MAP_HEIGHT: usize = 45;
 const NUM_BOTS: usize = 10;
+const NUM_FLOOR_ITEMS: usize = 15;
 const LAVA_DAMAGE_PER_SECOND: i32 = 25;
+const HEALTH_PACK_AMOUNT: i32 = 25;
+const SPEED_BOOST_DURATION: f32 = 5.0;
+const INVULNERABILITY_DURATION: f32 = 3.0;
 const MELEE_SWING_DURATION: f32 = 0.15;
 const MELEE_SWING_ARC: f32 = std::f32::consts::PI * 0.6; // ~108 degrees
 
@@ -109,6 +114,7 @@ pub struct GameState {
     bots: Vec<Bot>,
     projectiles: Vec<Projectile>,
     melee_swings: Vec<MeleeSwing>,
+    items: Vec<Item>,
     score: u32,
     camera_x: f32,
     camera_y: f32,
@@ -130,12 +136,20 @@ impl GameState {
             bots.push(Bot::new(x, y));
         }
 
+        // Spawn floor items (pistols and health packs)
+        let mut items = Vec::new();
+        for _ in 0..NUM_FLOOR_ITEMS {
+            let (x, y) = Self::find_walkable_spot(&map);
+            items.push(Item::random_floor_item(x, y));
+        }
+
         Self {
             map,
             player,
             bots,
             projectiles: Vec::new(),
             melee_swings: Vec::new(),
+            items,
             score: 0,
             camera_x: 0.0,
             camera_y: 0.0,
@@ -261,8 +275,10 @@ impl GameState {
         let input = get_player_input();
         self.player.update(dt, input, &self.map);
 
-        // Apply lava damage
-        if self.map.is_lava_at(self.player.pos.x, self.player.pos.y) {
+        // Apply lava damage (speed boost grants lava immunity)
+        if self.map.is_lava_at(self.player.pos.x, self.player.pos.y)
+            && self.player.speed_boost_timer <= 0.0
+        {
             self.lava_damage_accumulator += LAVA_DAMAGE_PER_SECOND as f32 * dt;
             let damage = self.lava_damage_accumulator as i32;
             if damage > 0 {
@@ -299,7 +315,20 @@ impl GameState {
             if let Some((tile_x, tile_y)) = projectile.update(dt, &self.map) {
                 // Projectile hit a tile - damage it if destructible
                 if self.map.is_destructible_at(tile_x, tile_y) {
-                    self.map.damage_tile(tile_x as usize, tile_y as usize);
+                    let tile = self.map.get_tile(tile_x as usize, tile_y as usize);
+                    let is_crate = tile == Some(TileType::Crate);
+                    let destroyed = self.map.damage_tile(tile_x as usize, tile_y as usize);
+                    if destroyed {
+                        // Roll for item drop
+                        let drop = if is_crate {
+                            Item::random_crate_drop(tile_x, tile_y)
+                        } else {
+                            Item::random_wall_drop(tile_x, tile_y)
+                        };
+                        if let Some(item) = drop {
+                            self.items.push(item);
+                        }
+                    }
                 }
             }
         }
@@ -335,6 +364,34 @@ impl GameState {
             swing.update(dt);
         }
         self.melee_swings.retain(|s| s.is_alive());
+
+        // Check item pickups
+        for item in &mut self.items {
+            if !item.alive {
+                continue;
+            }
+            let (ix, iy) = item.tile_position();
+            if self.player.pos.x == ix && self.player.pos.y == iy {
+                // Pick up the item
+                item.alive = false;
+                match item.item_type {
+                    ItemType::Weapon(kind) => {
+                        let weapon = kind.to_weapon();
+                        self.player.add_weapon(weapon);
+                    }
+                    ItemType::HealthPack => {
+                        self.player.heal(HEALTH_PACK_AMOUNT);
+                    }
+                    ItemType::SpeedBoost => {
+                        self.player.speed_boost_timer = SPEED_BOOST_DURATION;
+                    }
+                    ItemType::Invulnerability => {
+                        self.player.invulnerability_timer = INVULNERABILITY_DURATION;
+                    }
+                }
+            }
+        }
+        self.items.retain(|i| i.alive);
 
         for bot in &mut self.bots {
             bot.update(dt, &self.map);
@@ -372,6 +429,11 @@ impl GameState {
 
         for swing in &self.melee_swings {
             swing.draw(self.camera_x, self.camera_y);
+        }
+
+        // Draw items
+        for item in &self.items {
+            item.draw(self.camera_x, self.camera_y);
         }
 
         // Draw HUD (fixed on screen)
@@ -427,13 +489,45 @@ impl GameState {
             24.0,
             YELLOW,
         );
-        draw_text(
-            "1:Knife 2:Pistol 3:Shotgun 4:MP 5:Rifle",
-            10.0,
-            105.0,
-            16.0,
-            GRAY,
-        );
+
+        // Show available weapons
+        let weapon_list: String = self
+            .player
+            .weapons
+            .iter()
+            .enumerate()
+            .map(|(i, w)| {
+                format!(
+                    "{}:{}",
+                    i + 1,
+                    w.name.split_whitespace().next().unwrap_or(w.name)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        draw_text(&weapon_list, 10.0, 105.0, 16.0, GRAY);
+
+        // Show active buffs
+        let mut buff_y = 125.0;
+        if self.player.speed_boost_timer > 0.0 {
+            draw_text(
+                &format!("SPEED {:.1}s", self.player.speed_boost_timer),
+                10.0,
+                buff_y,
+                16.0,
+                Color::from_rgba(60, 150, 220, 255),
+            );
+            buff_y += 18.0;
+        }
+        if self.player.invulnerability_timer > 0.0 {
+            draw_text(
+                &format!("INVULN {:.1}s", self.player.invulnerability_timer),
+                10.0,
+                buff_y,
+                16.0,
+                Color::from_rgba(220, 200, 60, 255),
+            );
+        }
     }
 }
 

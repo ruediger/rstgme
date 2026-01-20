@@ -1,6 +1,7 @@
 mod entity;
 mod game;
 mod input;
+mod item;
 mod projectile;
 mod tile_map;
 mod weapon;

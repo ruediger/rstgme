@@ -78,6 +78,7 @@ impl Weapon {
         }
     }
 
+    #[allow(dead_code)]
     pub fn all_weapons() -> Vec<Weapon> {
         vec![
             Self::knife(),
