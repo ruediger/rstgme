@@ -113,6 +113,7 @@ impl MeleeSwing {
 }
 
 const DAMAGE_FLASH_DURATION: f32 = 0.35;
+const MESSAGE_DURATION: f32 = 3.0;
 
 pub struct GameState {
     map: TileMap,
@@ -126,6 +127,12 @@ pub struct GameState {
     camera_y: f32,
     lava_damage_accumulator: f32,
     damage_flash_timer: f32,
+    // Infection tracking
+    initial_non_hostile: usize,
+    shown_half_infected: bool,
+    shown_all_infected: bool,
+    message_timer: f32,
+    message_text: &'static str,
 }
 
 impl GameState {
@@ -155,6 +162,9 @@ impl GameState {
             items.push(Item::random_floor_item(x, y));
         }
 
+        // Count initial non-hostile bots for infection tracking
+        let initial_non_hostile = bots.iter().filter(|b| !b.hostile).count();
+
         Self {
             map,
             player,
@@ -167,6 +177,11 @@ impl GameState {
             camera_y: 0.0,
             lava_damage_accumulator: 0.0,
             damage_flash_timer: 0.0,
+            initial_non_hostile,
+            shown_half_infected: false,
+            shown_all_infected: false,
+            message_timer: 0.0,
+            message_text: "",
         }
     }
 
@@ -373,8 +388,9 @@ impl GameState {
                     && projectile.y <= by + half_size
                 {
                     projectile.alive = false;
+                    // Hostile bots give more points
+                    self.score += if bot.hostile { 3 } else { 1 };
                     bot.kill();
-                    self.score += 1;
                 }
             }
         }
@@ -416,11 +432,31 @@ impl GameState {
         }
         self.items.retain(|i| i.alive);
 
-        let player_pos = Some((self.player.pos.x, self.player.pos.y));
-        for bot in &mut self.bots {
-            bot.update(dt, &self.map, player_pos);
+        // Collect non-hostile bot positions for hostile bots to target
+        let non_hostile_positions: Vec<(i32, i32)> = self
+            .bots
+            .iter()
+            .filter(|b| b.alive && !b.hostile)
+            .map(|b| (b.pos.x, b.pos.y))
+            .collect();
 
-            // Check if hostile bot wants to shoot
+        let player_pos = (self.player.pos.x, self.player.pos.y);
+        for bot in &mut self.bots {
+            // Hostile bots target nearby non-hostile bots for infection, otherwise player
+            let target = if bot.hostile && !non_hostile_positions.is_empty() {
+                // Find nearest non-hostile bot
+                let (bx, by) = (bot.pos.x, bot.pos.y);
+                let nearest = non_hostile_positions
+                    .iter()
+                    .min_by_key(|(x, y)| (x - bx).abs() + (y - by).abs());
+                nearest.copied()
+            } else {
+                Some(player_pos)
+            };
+
+            bot.update(dt, &self.map, target);
+
+            // Check if hostile bot wants to shoot (always target player)
             if let Some((dx, dy)) = bot.try_shoot(self.player.pos.x, self.player.pos.y) {
                 let (bx, by) = bot.pos.center_pixel();
                 let projectile = Projectile::new_bot(
@@ -432,6 +468,49 @@ impl GameState {
                     TILE_SIZE * 10.0, // Bot projectile range
                 );
                 self.projectiles.push(projectile);
+            }
+        }
+
+        // Hostile bots infect non-hostile bots by touching them
+        let mut to_infect = Vec::new();
+        for (i, bot) in self.bots.iter().enumerate() {
+            if !bot.alive || bot.hostile {
+                continue;
+            }
+            // Check if any hostile bot is on the same tile
+            for other in &self.bots {
+                if !other.alive || !other.hostile {
+                    continue;
+                }
+                if bot.pos.x == other.pos.x && bot.pos.y == other.pos.y {
+                    to_infect.push(i);
+                    break;
+                }
+            }
+        }
+        for i in to_infect {
+            self.bots[i].infect();
+        }
+
+        // Update message timer
+        if self.message_timer > 0.0 {
+            self.message_timer -= dt;
+        }
+
+        // Check infection progress and show warning messages
+        if self.initial_non_hostile > 0 {
+            let current_non_hostile = self.bots.iter().filter(|b| b.alive && !b.hostile).count();
+            let infected_count = self.initial_non_hostile - current_non_hostile;
+            let infection_ratio = infected_count as f32 / self.initial_non_hostile as f32;
+
+            if !self.shown_all_infected && current_non_hostile == 0 {
+                self.shown_all_infected = true;
+                self.message_timer = MESSAGE_DURATION;
+                self.message_text = "ALL BOTS HAVE BEEN CORRUPTED!";
+            } else if !self.shown_half_infected && infection_ratio >= 0.5 {
+                self.shown_half_infected = true;
+                self.message_timer = MESSAGE_DURATION;
+                self.message_text = "WARNING: The infection is spreading...";
             }
         }
 
@@ -598,6 +677,41 @@ impl GameState {
                 16.0,
                 Color::from_rgba(220, 200, 60, 255),
             );
+        }
+
+        // Draw infection warning message
+        if self.message_timer > 0.0 {
+            let alpha = if self.message_timer > MESSAGE_DURATION - 0.3 {
+                // Fade in
+                ((MESSAGE_DURATION - self.message_timer) / 0.3 * 255.0) as u8
+            } else if self.message_timer < 0.5 {
+                // Fade out
+                (self.message_timer / 0.5 * 255.0) as u8
+            } else {
+                255
+            };
+
+            let text = self.message_text;
+            let font_size = 32.0;
+            let text_width = measure_text(text, None, font_size as u16, 1.0).width;
+            let x = (screen_width() - text_width) / 2.0;
+            let y = screen_height() / 3.0;
+
+            // Draw shadow
+            draw_text(
+                text,
+                x + 2.0,
+                y + 2.0,
+                font_size,
+                Color::from_rgba(0, 0, 0, alpha / 2),
+            );
+            // Draw text in warning red/orange color
+            let color = if self.shown_all_infected {
+                Color::from_rgba(255, 50, 50, alpha) // Red for all infected
+            } else {
+                Color::from_rgba(255, 180, 50, alpha) // Orange for half infected
+            };
+            draw_text(text, x, y, font_size, color);
         }
     }
 }

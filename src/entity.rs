@@ -226,6 +226,12 @@ impl Bot {
         self.respawn_timer = rand::gen_range(5.0, 15.0);
     }
 
+    /// Turn this bot hostile (infected by another hostile bot)
+    pub fn infect(&mut self) {
+        self.hostile = true;
+        self.move_interval = 0.3 + rand::gen_range(0.0, 0.2);
+    }
+
     pub fn update(&mut self, dt: f32, map: &TileMap, player_pos: Option<(i32, i32)>) {
         if !self.alive {
             self.respawn_timer -= dt;
