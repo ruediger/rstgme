@@ -1,7 +1,7 @@
 use macroquad::prelude::*;
 
 use crate::input::MoveDirection;
-use crate::sprites::{SpriteSheet, direction, movement_to_direction};
+use crate::sprites::{SpriteSheet, direction, direction_to_vector, movement_to_direction};
 use crate::tile_map::{EntityType, TILE_SIZE, TileMap};
 use crate::weapon::Weapon;
 
@@ -190,6 +190,9 @@ pub struct Bot {
     respawn_timer: f32,
     pub hostile: bool,
     pub shoot_cooldown: f32,
+    last_move_dir: (i32, i32),       // For corridor-following behavior
+    prev_positions: [(i32, i32); 4], // Track recent positions to detect oscillation
+    pos_index: usize,
 }
 
 impl Bot {
@@ -204,6 +207,9 @@ impl Bot {
             respawn_timer: 0.0,
             hostile: false,
             shoot_cooldown: 0.0,
+            last_move_dir: (0, 1),
+            prev_positions: [(x, y); 4],
+            pos_index: 0,
         }
     }
 
@@ -213,11 +219,14 @@ impl Bot {
             spawn_pos: Position::new(x, y),
             facing: direction::DOWN,
             move_timer: 0.0,
-            move_interval: 0.3 + rand::gen_range(0.0, 0.2), // Faster movement
+            move_interval: 0.2 + rand::gen_range(0.0, 0.15), // Very fast movement for scouting
             alive: true,
             respawn_timer: 0.0,
             hostile: true,
             shoot_cooldown: rand::gen_range(0.0, 1.0), // Stagger initial shots
+            last_move_dir: (0, 1),
+            prev_positions: [(x, y); 4],
+            pos_index: 0,
         }
     }
 
@@ -232,7 +241,7 @@ impl Bot {
         self.move_interval = 0.3 + rand::gen_range(0.0, 0.2);
     }
 
-    pub fn update(&mut self, dt: f32, map: &TileMap, player_pos: Option<(i32, i32)>) {
+    pub fn update(&mut self, dt: f32, map: &TileMap, target_pos: Option<(i32, i32)>) {
         if !self.alive {
             self.respawn_timer -= dt;
             if self.respawn_timer <= 0.0 {
@@ -241,12 +250,16 @@ impl Bot {
                 // 50% chance to respawn as hostile
                 if rand::gen_range(0.0, 1.0) < 0.5 {
                     self.hostile = true;
-                    self.move_interval = 0.3 + rand::gen_range(0.0, 0.2);
+                    self.move_interval = 0.2 + rand::gen_range(0.0, 0.15);
                 } else {
                     self.hostile = false;
                     self.move_interval = 0.5 + rand::gen_range(0.0, 0.5);
                 }
                 self.shoot_cooldown = rand::gen_range(0.0, 1.0);
+                self.last_move_dir = (0, 1);
+                // Reset position history
+                self.prev_positions = [(self.spawn_pos.x, self.spawn_pos.y); 4];
+                self.pos_index = 0;
             }
             return;
         }
@@ -261,39 +274,201 @@ impl Bot {
         if self.pos.is_at_target() && self.move_timer >= self.move_interval {
             self.move_timer = 0.0;
 
-            let (dx, dy) = if let (true, Some((px, py))) = (self.hostile, player_pos) {
-                // Chase the player
-                let diff_x = px - self.pos.x;
-                let diff_y = py - self.pos.y;
-
-                // Move towards player (prefer larger difference)
-                if diff_x.abs() > diff_y.abs() {
-                    (diff_x.signum(), 0)
-                } else if diff_y != 0 {
-                    (0, diff_y.signum())
+            // Hostile bots stop moving when close to target (stand and shoot)
+            let should_stand = if self.hostile {
+                if let Some((tx, ty)) = target_pos {
+                    let dist = (tx - self.pos.x).abs() + (ty - self.pos.y).abs();
+                    dist <= 3 // Stand and shoot when within 3 tiles
                 } else {
-                    (diff_x.signum(), 0)
+                    false
                 }
             } else {
-                // Random direction for non-hostile bots
-                let directions = [(0, -1), (0, 1), (-1, 0), (1, 0)];
-                directions[rand::gen_range(0, 4)]
+                false
             };
 
-            let new_x = self.pos.x + dx;
-            let new_y = self.pos.y + dy;
+            if should_stand {
+                // Just face the target, don't move
+                if let Some((tx, ty)) = target_pos {
+                    let dx = (tx - self.pos.x).signum();
+                    let dy = (ty - self.pos.y).signum();
+                    if dx != 0 || dy != 0 {
+                        self.facing = movement_to_direction(dx, dy);
+                    }
+                }
+            } else {
+                let move_dir = if self.hostile {
+                    self.calculate_hostile_move(map, target_pos)
+                } else {
+                    // Random direction for non-hostile bots
+                    let directions = [(0, -1), (0, 1), (-1, 0), (1, 0)];
+                    directions[rand::gen_range(0, 4)]
+                };
 
-            // Update facing direction
-            self.facing = movement_to_direction(dx, dy);
+                let (dx, dy) = move_dir;
+                let new_x = self.pos.x + dx;
+                let new_y = self.pos.y + dy;
 
-            if map.is_walkable_by(new_x, new_y, EntityType::Bot) {
-                self.pos.x = new_x;
-                self.pos.y = new_y;
+                // Update facing direction
+                if dx != 0 || dy != 0 {
+                    self.facing = movement_to_direction(dx, dy);
+                }
+
+                if map.is_walkable_by(new_x, new_y, EntityType::Bot) {
+                    // Check for oscillation: if new position was visited recently, try random
+                    let new_pos = (new_x, new_y);
+                    let oscillating = self
+                        .prev_positions
+                        .iter()
+                        .filter(|&&p| p == new_pos)
+                        .count()
+                        >= 2;
+
+                    if oscillating && self.hostile {
+                        // Break oscillation: pick a random walkable direction
+                        let all_dirs = [(0, -1), (0, 1), (-1, 0), (1, 0)];
+                        let mut shuffled = all_dirs;
+                        for i in (1..4).rev() {
+                            let j = rand::gen_range(0, i + 1);
+                            shuffled.swap(i, j);
+                        }
+                        for (rdx, rdy) in shuffled {
+                            let rx = self.pos.x + rdx;
+                            let ry = self.pos.y + rdy;
+                            if map.is_walkable_by(rx, ry, EntityType::Bot) {
+                                self.pos.x = rx;
+                                self.pos.y = ry;
+                                self.last_move_dir = (rdx, rdy);
+                                self.facing = movement_to_direction(rdx, rdy);
+                                break;
+                            }
+                        }
+                    } else {
+                        self.pos.x = new_x;
+                        self.pos.y = new_y;
+                        self.last_move_dir = (dx, dy);
+                    }
+
+                    // Track position history
+                    self.prev_positions[self.pos_index] = (self.pos.x, self.pos.y);
+                    self.pos_index = (self.pos_index + 1) % 4;
+                }
             }
         }
 
         let speed_mult = map.get_speed_at(self.pos.x, self.pos.y);
         self.pos.update_visual(dt, speed_mult);
+    }
+
+    /// Calculate movement direction for hostile bots with corridor-following behavior.
+    /// Tries multiple directions to navigate around walls in the labyrinth.
+    fn calculate_hostile_move(&self, map: &TileMap, target_pos: Option<(i32, i32)>) -> (i32, i32) {
+        // The reverse of last move - avoid this to prevent oscillation
+        let reverse_dir = (-self.last_move_dir.0, -self.last_move_dir.1);
+
+        let Some((tx, ty)) = target_pos else {
+            // No target - patrol mode: continue in last direction, turn at dead ends
+            if self.last_move_dir != (0, 0)
+                && map.is_walkable_by(
+                    self.pos.x + self.last_move_dir.0,
+                    self.pos.y + self.last_move_dir.1,
+                    EntityType::Bot,
+                )
+            {
+                return self.last_move_dir;
+            }
+            // Try perpendicular directions first (turn at corners)
+            let perpendiculars = if self.last_move_dir.0 != 0 {
+                [(0, 1), (0, -1)]
+            } else {
+                [(1, 0), (-1, 0)]
+            };
+            for (dx, dy) in perpendiculars {
+                if map.is_walkable_by(self.pos.x + dx, self.pos.y + dy, EntityType::Bot) {
+                    return (dx, dy);
+                }
+            }
+            // Last resort: reverse
+            return reverse_dir;
+        };
+
+        let diff_x = tx - self.pos.x;
+        let diff_y = ty - self.pos.y;
+
+        // Direction towards target on each axis
+        let towards_x = if diff_x != 0 {
+            (diff_x.signum(), 0)
+        } else {
+            (0, 0)
+        };
+        let towards_y = if diff_y != 0 {
+            (0, diff_y.signum())
+        } else {
+            (0, 0)
+        };
+
+        // Check which directions towards target are walkable
+        let can_go_x = towards_x != (0, 0)
+            && map.is_walkable_by(
+                self.pos.x + towards_x.0,
+                self.pos.y + towards_x.1,
+                EntityType::Bot,
+            );
+        let can_go_y = towards_y != (0, 0)
+            && map.is_walkable_by(
+                self.pos.x + towards_y.0,
+                self.pos.y + towards_y.1,
+                EntityType::Bot,
+            );
+
+        // If we can move towards target, do it (prefer larger distance axis)
+        if can_go_x && can_go_y {
+            return if diff_x.abs() > diff_y.abs() {
+                towards_x
+            } else {
+                towards_y
+            };
+        }
+        if can_go_x {
+            return towards_x;
+        }
+        if can_go_y {
+            return towards_y;
+        }
+
+        // Can't move directly towards target - need to navigate around obstacle
+        // First, try continuing in last direction (corridor following)
+        if self.last_move_dir != (0, 0)
+            && map.is_walkable_by(
+                self.pos.x + self.last_move_dir.0,
+                self.pos.y + self.last_move_dir.1,
+                EntityType::Bot,
+            )
+        {
+            return self.last_move_dir;
+        }
+
+        // Try perpendicular directions (but not reverse)
+        let all_dirs = [(0, -1), (0, 1), (-1, 0), (1, 0)];
+        for (dx, dy) in all_dirs {
+            if (dx, dy) == reverse_dir {
+                continue; // Skip reverse direction for now
+            }
+            if map.is_walkable_by(self.pos.x + dx, self.pos.y + dy, EntityType::Bot) {
+                return (dx, dy);
+            }
+        }
+
+        // Last resort: reverse direction (dead end)
+        if map.is_walkable_by(
+            self.pos.x + reverse_dir.0,
+            self.pos.y + reverse_dir.1,
+            EntityType::Bot,
+        ) {
+            return reverse_dir;
+        }
+
+        // Completely stuck
+        (0, 0)
     }
 
     /// Check if hostile bot can shoot and return target direction if so
@@ -307,14 +482,18 @@ impl Bot {
         let dy = player_y - by;
         let dist_sq = dx * dx + dy * dy;
 
-        // Only shoot if within range (8 tiles) and have line of sight
+        // Only shoot if within range (8 tiles)
         if dist_sq <= 64 {
-            self.shoot_cooldown = 1.5 + rand::gen_range(0.0, 1.0); // 1.5-2.5s between shots
+            self.shoot_cooldown = 1.0 + rand::gen_range(0.0, 0.5); // Faster shooting: 1.0-1.5s
 
             // Return normalized direction
             let dist = (dist_sq as f32).sqrt();
             if dist > 0.0 {
                 return Some((dx as f32 / dist, dy as f32 / dist));
+            } else {
+                // On top of player - shoot in facing direction
+                let (fdx, fdy) = direction_to_vector(self.facing);
+                return Some((fdx, fdy));
             }
         }
 

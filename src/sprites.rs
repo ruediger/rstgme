@@ -263,3 +263,18 @@ pub fn movement_to_direction(dx: i32, dy: i32) -> u32 {
         _ => direction::DOWN, // Default
     }
 }
+
+/// Convert a direction index to a normalized (f32, f32) vector
+pub fn direction_to_vector(dir: u32) -> (f32, f32) {
+    match dir {
+        direction::DOWN => (0.0, 1.0),
+        direction::DOWN_RIGHT => (0.707, 0.707),
+        direction::RIGHT => (1.0, 0.0),
+        direction::UP_RIGHT => (0.707, -0.707),
+        direction::UP => (0.0, -1.0),
+        direction::UP_LEFT => (-0.707, -0.707),
+        direction::LEFT => (-1.0, 0.0),
+        direction::DOWN_LEFT => (-0.707, 0.707),
+        _ => (0.0, 1.0), // Default down
+    }
+}

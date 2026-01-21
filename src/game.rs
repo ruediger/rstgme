@@ -11,8 +11,8 @@ const BOT_HITBOX_SIZE: f32 = TILE_SIZE - 8.0;
 const PLAYER_HITBOX_SIZE: f32 = TILE_SIZE - 8.0;
 const MAP_WIDTH: usize = 60;
 const MAP_HEIGHT: usize = 45;
-const NUM_BOTS: usize = 6;
-const NUM_HOSTILE_BOTS: usize = 4;
+const NUM_BOTS: usize = 10;
+const NUM_HOSTILE_BOTS: usize = 6;
 const NUM_FLOOR_ITEMS: usize = 15;
 const BOT_PROJECTILE_DAMAGE: i32 = 10;
 const LAVA_DAMAGE_PER_SECOND: i32 = 25;
@@ -441,15 +441,26 @@ impl GameState {
             .collect();
 
         let player_pos = (self.player.pos.x, self.player.pos.y);
+        const PLAYER_AGGRO_RANGE: i32 = 6; // Switch to player when this close
+
         for bot in &mut self.bots {
-            // Hostile bots target nearby non-hostile bots for infection, otherwise player
-            let target = if bot.hostile && !non_hostile_positions.is_empty() {
-                // Find nearest non-hostile bot
+            // Hostile bots target player if close, otherwise hunt non-hostile bots
+            let target = if bot.hostile {
                 let (bx, by) = (bot.pos.x, bot.pos.y);
-                let nearest = non_hostile_positions
-                    .iter()
-                    .min_by_key(|(x, y)| (x - bx).abs() + (y - by).abs());
-                nearest.copied()
+                let player_dist = (player_pos.0 - bx).abs() + (player_pos.1 - by).abs();
+
+                // Chase player if within aggro range
+                if player_dist <= PLAYER_AGGRO_RANGE {
+                    Some(player_pos)
+                } else if !non_hostile_positions.is_empty() {
+                    // Otherwise find nearest non-hostile bot to infect
+                    let nearest = non_hostile_positions
+                        .iter()
+                        .min_by_key(|(x, y)| (x - bx).abs() + (y - by).abs());
+                    nearest.copied()
+                } else {
+                    Some(player_pos)
+                }
             } else {
                 Some(player_pos)
             };
