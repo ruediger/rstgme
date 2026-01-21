@@ -500,7 +500,8 @@ impl GameState {
         // Check infection progress and show warning messages
         if self.initial_non_hostile > 0 {
             let current_non_hostile = self.bots.iter().filter(|b| b.alive && !b.hostile).count();
-            let infected_count = self.initial_non_hostile - current_non_hostile;
+            // Use saturating_sub to handle case where bots respawn as non-hostile
+            let infected_count = self.initial_non_hostile.saturating_sub(current_non_hostile);
             let infection_ratio = infected_count as f32 / self.initial_non_hostile as f32;
 
             if !self.shown_all_infected && current_non_hostile == 0 {
