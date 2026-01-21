@@ -238,6 +238,15 @@ impl Bot {
             if self.respawn_timer <= 0.0 {
                 self.alive = true;
                 self.pos = self.spawn_pos;
+                // 50% chance to respawn as hostile
+                if rand::gen_range(0.0, 1.0) < 0.5 {
+                    self.hostile = true;
+                    self.move_interval = 0.3 + rand::gen_range(0.0, 0.2);
+                } else {
+                    self.hostile = false;
+                    self.move_interval = 0.5 + rand::gen_range(0.0, 0.5);
+                }
+                self.shoot_cooldown = rand::gen_range(0.0, 1.0);
             }
             return;
         }
