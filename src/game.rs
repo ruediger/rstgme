@@ -137,7 +137,7 @@ pub struct GameState {
 
 impl GameState {
     pub fn new() -> Self {
-        let map = TileMap::create_random(MAP_WIDTH, MAP_HEIGHT);
+        let map = TileMap::create_labyrinth(MAP_WIDTH, MAP_HEIGHT);
 
         // Place player at a walkable spot
         let (px, py) = Self::find_walkable_spot(&map);

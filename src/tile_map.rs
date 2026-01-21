@@ -106,6 +106,7 @@ impl TileMap {
         }
     }
 
+    #[allow(dead_code)] // Kept for tests and potential alternative game modes
     pub fn create_random(width: usize, height: usize) -> Self {
         let mut map = Self::new(width, height);
 
@@ -273,6 +274,296 @@ impl TileMap {
         }
 
         map
+    }
+
+    /// Creates a labyrinth-style map using recursive backtracking algorithm.
+    /// This generates proper corridors and rooms instead of random tile placement.
+    pub fn create_labyrinth(width: usize, height: usize) -> Self {
+        let mut map = Self::new(width, height);
+
+        // Fill with walls
+        for y in 0..height {
+            for x in 0..width {
+                map.set_tile(x, y, TileType::Wall);
+            }
+        }
+
+        // Generate maze using iterative backtracking (avoid stack overflow)
+        map.carve_maze(1, 1);
+
+        // Add rooms (creates open areas for combat)
+        let room_count = (width * height) / 400 + 2; // Scale with map size
+        map.add_rooms(room_count);
+
+        // Add loops to create alternative paths
+        let loop_count = width * height / 50;
+        map.add_loops(loop_count);
+
+        // Add terrain features
+        map.add_terrain();
+
+        // Add doors at corridor junctions
+        map.add_doors();
+
+        // Add crates scattered around
+        map.add_labyrinth_crates();
+
+        map
+    }
+
+    /// Carve a maze using iterative depth-first backtracking.
+    /// Uses an explicit stack to avoid stack overflow on large maps.
+    fn carve_maze(&mut self, start_x: usize, start_y: usize) {
+        let mut stack = vec![(start_x, start_y)];
+        self.set_tile(start_x, start_y, TileType::Floor);
+
+        while let Some(&(x, y)) = stack.last() {
+            // Get unvisited neighbors 2 cells away
+            let mut neighbors = Vec::new();
+            let directions: [(i32, i32); 4] = [(0, -2), (0, 2), (-2, 0), (2, 0)];
+
+            for (dx, dy) in directions {
+                let nx = x as i32 + dx;
+                let ny = y as i32 + dy;
+
+                if nx > 0
+                    && (nx as usize) < self.width - 1
+                    && ny > 0
+                    && (ny as usize) < self.height - 1
+                    && self.get_tile(nx as usize, ny as usize) == Some(TileType::Wall)
+                {
+                    neighbors.push((nx as usize, ny as usize, dx, dy));
+                }
+            }
+
+            if neighbors.is_empty() {
+                // Backtrack
+                stack.pop();
+            } else {
+                // Choose random neighbor
+                let idx = rand::gen_range(0, neighbors.len());
+                let (nx, ny, dx, dy) = neighbors[idx];
+
+                // Carve the wall between current and next
+                let wx = (x as i32 + dx / 2) as usize;
+                let wy = (y as i32 + dy / 2) as usize;
+                self.set_tile(wx, wy, TileType::Floor);
+                self.set_tile(nx, ny, TileType::Floor);
+
+                stack.push((nx, ny));
+            }
+        }
+    }
+
+    /// Add rectangular rooms to create open areas for combat.
+    fn add_rooms(&mut self, count: usize) {
+        for _ in 0..count {
+            let room_w = rand::gen_range(3, 7);
+            let room_h = rand::gen_range(3, 7);
+
+            // Ensure room fits within map bounds
+            if room_w + 4 >= self.width || room_h + 4 >= self.height {
+                continue;
+            }
+
+            let rx = rand::gen_range(2, self.width - room_w - 2);
+            let ry = rand::gen_range(2, self.height - room_h - 2);
+
+            for y in ry..ry + room_h {
+                for x in rx..rx + room_w {
+                    self.set_tile(x, y, TileType::Floor);
+                }
+            }
+        }
+    }
+
+    /// Add loops by removing some walls to create alternative paths.
+    fn add_loops(&mut self, count: usize) {
+        let mut added = 0;
+        let max_attempts = count * 10;
+        let mut attempts = 0;
+
+        while added < count && attempts < max_attempts {
+            attempts += 1;
+            let x = rand::gen_range(2, self.width - 2);
+            let y = rand::gen_range(2, self.height - 2);
+
+            if self.get_tile(x, y) != Some(TileType::Wall) {
+                continue;
+            }
+
+            // Check if removing would connect two floor tiles
+            let h_connect = self.get_tile(x.wrapping_sub(1), y) == Some(TileType::Floor)
+                && self.get_tile(x + 1, y) == Some(TileType::Floor);
+            let v_connect = self.get_tile(x, y.wrapping_sub(1)) == Some(TileType::Floor)
+                && self.get_tile(x, y + 1) == Some(TileType::Floor);
+
+            if h_connect || v_connect {
+                self.set_tile(x, y, TileType::Floor);
+                added += 1;
+            }
+        }
+    }
+
+    /// Add terrain features (sand, water, lava, pits) to corridors and rooms.
+    fn add_terrain(&mut self) {
+        // Add sand patches in corridors
+        let num_sand = (self.width * self.height) / 100;
+        for _ in 0..num_sand {
+            let x = rand::gen_range(2, self.width - 2);
+            let y = rand::gen_range(2, self.height - 2);
+            if self.get_tile(x, y) == Some(TileType::Floor) {
+                self.set_tile(x, y, TileType::Sand);
+                // Expand sand slightly
+                for (dx, dy) in [(0, 1), (1, 0), (0, -1_i32), (-1, 0)] {
+                    let nx = (x as i32 + dx) as usize;
+                    let ny = (y as i32 + dy) as usize;
+                    if rand::gen_range(0, 3) == 0 && self.get_tile(nx, ny) == Some(TileType::Floor)
+                    {
+                        self.set_tile(nx, ny, TileType::Sand);
+                    }
+                }
+            }
+        }
+
+        // Add water pools in rooms (larger areas)
+        let num_water = (self.width * self.height) / 200;
+        for _ in 0..num_water {
+            let x = rand::gen_range(3, self.width - 3);
+            let y = rand::gen_range(3, self.height - 3);
+            let tile = self.get_tile(x, y);
+            if tile == Some(TileType::Floor) || tile == Some(TileType::Sand) {
+                self.set_tile(x, y, TileType::Water);
+                // Expand water
+                for (dx, dy) in [(0, 1), (1, 0), (0, -1_i32), (-1, 0), (1, 1), (-1, -1)] {
+                    let nx = (x as i32 + dx) as usize;
+                    let ny = (y as i32 + dy) as usize;
+                    if rand::gen_range(0, 2) == 0 {
+                        let ntile = self.get_tile(nx, ny);
+                        if ntile == Some(TileType::Floor) || ntile == Some(TileType::Sand) {
+                            self.set_tile(nx, ny, TileType::Water);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Add lava hazards (small and strategic)
+        let num_lava = (self.width * self.height) / 300;
+        for _ in 0..num_lava {
+            let x = rand::gen_range(4, self.width - 4);
+            let y = rand::gen_range(4, self.height - 4);
+            if self.get_tile(x, y) == Some(TileType::Floor) {
+                self.set_tile(x, y, TileType::Lava);
+                // Maybe add one adjacent lava tile
+                if rand::gen_range(0, 3) == 0 {
+                    let dirs = [(0, 1), (1, 0), (0, -1_i32), (-1, 0)];
+                    let (dx, dy) = dirs[rand::gen_range(0, 4)];
+                    let nx = (x as i32 + dx) as usize;
+                    let ny = (y as i32 + dy) as usize;
+                    if self.get_tile(nx, ny) == Some(TileType::Floor) {
+                        self.set_tile(nx, ny, TileType::Lava);
+                    }
+                }
+            }
+        }
+
+        // Add pits (block movement but not projectiles)
+        let num_pits = (self.width * self.height) / 250;
+        for _ in 0..num_pits {
+            let x = rand::gen_range(3, self.width - 3);
+            let y = rand::gen_range(3, self.height - 3);
+            if self.get_tile(x, y) == Some(TileType::Floor) {
+                self.set_tile(x, y, TileType::Pit);
+            }
+        }
+    }
+
+    /// Add doors at corridor junctions and choke points.
+    fn add_doors(&mut self) {
+        let num_doors = (self.width * self.height) / 150;
+        let mut added = 0;
+        let max_attempts = num_doors * 20;
+        let mut attempts = 0;
+
+        while added < num_doors && attempts < max_attempts {
+            attempts += 1;
+            let x = rand::gen_range(2, self.width - 2);
+            let y = rand::gen_range(2, self.height - 2);
+
+            if self.get_tile(x, y) != Some(TileType::Floor) {
+                continue;
+            }
+
+            // Check if this is a corridor (walls on two opposite sides, floor on the other two)
+            let north = self.get_tile(x, y.wrapping_sub(1));
+            let south = self.get_tile(x, y + 1);
+            let east = self.get_tile(x + 1, y);
+            let west = self.get_tile(x.wrapping_sub(1), y);
+
+            let is_h_corridor = north == Some(TileType::Wall)
+                && south == Some(TileType::Wall)
+                && (east == Some(TileType::Floor) || east == Some(TileType::Sand))
+                && (west == Some(TileType::Floor) || west == Some(TileType::Sand));
+
+            let is_v_corridor = east == Some(TileType::Wall)
+                && west == Some(TileType::Wall)
+                && (north == Some(TileType::Floor) || north == Some(TileType::Sand))
+                && (south == Some(TileType::Floor) || south == Some(TileType::Sand));
+
+            if is_h_corridor || is_v_corridor {
+                let door_type = match rand::gen_range(0, 4) {
+                    0 => TileType::DoorPlayer,
+                    1 => TileType::DoorBot,
+                    _ => TileType::DoorBoth, // More common
+                };
+                self.set_tile(x, y, door_type);
+                added += 1;
+            }
+        }
+    }
+
+    /// Add crates scattered in floor areas of the labyrinth.
+    fn add_labyrinth_crates(&mut self) {
+        let num_crates = (self.width * self.height) / 80;
+        let mut added = 0;
+        let max_attempts = num_crates * 5;
+        let mut attempts = 0;
+
+        while added < num_crates && attempts < max_attempts {
+            attempts += 1;
+            let x = rand::gen_range(2, self.width - 2);
+            let y = rand::gen_range(2, self.height - 2);
+
+            if self.get_tile(x, y) != Some(TileType::Floor) {
+                continue;
+            }
+
+            // Prefer placing crates in rooms (areas with more open space)
+            let mut floor_neighbors = 0;
+            for (dx, dy) in [(-1, 0), (1, 0), (0, -1_i32), (0, 1)] {
+                let nx = (x as i32 + dx) as usize;
+                let ny = (y as i32 + dy) as usize;
+                if let Some(tile) = self.get_tile(nx, ny)
+                    && tile.is_walkable_by(EntityType::Player)
+                {
+                    floor_neighbors += 1;
+                }
+            }
+
+            // Place crate if it's in an open area (at least 3 walkable neighbors)
+            // or randomly in corridors
+            if floor_neighbors >= 3 || rand::gen_range(0, 4) == 0 {
+                // Mix of crate types
+                let tile = if rand::gen_range(0, 5) == 0 {
+                    TileType::WallDestructible
+                } else {
+                    TileType::Crate
+                };
+                self.set_tile(x, y, tile);
+                added += 1;
+            }
+        }
     }
 
     pub fn get_tile(&self, x: usize, y: usize) -> Option<TileType> {
