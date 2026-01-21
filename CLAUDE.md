@@ -18,6 +18,7 @@ Use `cargo fmt` to keep code formatted and `cargo clippy` to lint the code.
 - `weapon.rs` - Weapon struct with fire rate, cooldown, bullet speed
 - `projectile.rs` - Projectile movement and wall collision
 - `item.rs` - Item pickups (weapons, health packs, buffs)
+- `sprites.rs` - SpriteSheet loading and drawing, direction helpers
 
 ## Architecture Notes
 
@@ -28,28 +29,34 @@ Use `cargo fmt` to keep code formatted and `cargo clippy` to lint the code.
 - Movement speed affected by tile type (sand/water slow down)
 - Projectiles use pixel coordinates and continuous movement
 - Projectiles check `blocks_projectile()` for collision (pit lets projectiles pass)
+- Projectiles track source (`from_player`) for collision filtering
 - Destructible tiles tracked via `HashMap<(usize, usize), u8>` for health
 - EntityType (Player/Bot) determines door access
-- Bots move randomly on a timer
+- Bots move randomly on a timer; hostile bots chase player
+- Sprites loaded from `data/sprites.png` (see SPRITES.md for layout)
 
 ## Current Features
 
 - Player movement with WASD/arrows
 - Bots that wander randomly (respawn 5-15s after death)
+- **Hostile bots** that chase and shoot at the player (red tinted)
 - Large random map (60x45) with camera following player
 - Mouse aiming with visual aim line
 - Shooting with left mouse button
 - Melee attack animation (knife swing arc)
 - Projectile-bot collision with score tracking
+- Projectile source tracking (player vs bot projectiles)
 - Multiple weapons (1-5 keys): Knife, Pistol, Shotgun, Machine Pistol, Rifle
 - Extended tile system with different behaviors
 - Player health system (100 HP, respawn on death)
 - Lava deals 25 damage per second
+- **Red screen flash** when taking damage (pulsing effect)
 - Health bar in HUD (green/yellow/red based on health)
 - Item pickup system (weapons, health packs, buffs)
 - Items spawn on floor and drop from destroyed crates/walls
 - Speed boost (5s, 2x speed + lava immunity)
 - Invulnerability (3s, no damage)
+- **Sprite-based rendering** with 8-directional rotation for entities
 
 ## Tile Types
 
@@ -81,8 +88,8 @@ Use `cargo fmt` to keep code formatted and `cargo clippy` to lint the code.
 
 ## TODO / Future
 
-- Bot AI (chase player, shoot back)
 - Ammunition system
 - Keycards for doors
-- Graphics/sprites
+- Different sprite for hostile bots
+- Sound effects
 - Online multiplayer
