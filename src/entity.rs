@@ -1,4 +1,5 @@
 use macroquad::prelude::*;
+use std::collections::VecDeque;
 
 use crate::input::MoveDirection;
 use crate::sprites::{SpriteSheet, direction, direction_to_vector, movement_to_direction};
@@ -190,9 +191,10 @@ pub struct Bot {
     respawn_timer: f32,
     pub hostile: bool,
     pub shoot_cooldown: f32,
-    last_move_dir: (i32, i32),       // For corridor-following behavior
-    prev_positions: [(i32, i32); 4], // Track recent positions to detect oscillation
-    pos_index: usize,
+    // Pathfinding
+    path: VecDeque<(i32, i32)>,
+    path_target: Option<(i32, i32)>,
+    path_recalc_timer: f32,
 }
 
 impl Bot {
@@ -207,9 +209,9 @@ impl Bot {
             respawn_timer: 0.0,
             hostile: false,
             shoot_cooldown: 0.0,
-            last_move_dir: (0, 1),
-            prev_positions: [(x, y); 4],
-            pos_index: 0,
+            path: VecDeque::new(),
+            path_target: None,
+            path_recalc_timer: 0.0,
         }
     }
 
@@ -219,14 +221,14 @@ impl Bot {
             spawn_pos: Position::new(x, y),
             facing: direction::DOWN,
             move_timer: 0.0,
-            move_interval: 0.2 + rand::gen_range(0.0, 0.15), // Very fast movement for scouting
+            move_interval: 0.2 + rand::gen_range(0.0, 0.15), // Fast movement
             alive: true,
             respawn_timer: 0.0,
             hostile: true,
             shoot_cooldown: rand::gen_range(0.0, 1.0), // Stagger initial shots
-            last_move_dir: (0, 1),
-            prev_positions: [(x, y); 4],
-            pos_index: 0,
+            path: VecDeque::new(),
+            path_target: None,
+            path_recalc_timer: 0.0,
         }
     }
 
@@ -256,10 +258,10 @@ impl Bot {
                     self.move_interval = 0.5 + rand::gen_range(0.0, 0.5);
                 }
                 self.shoot_cooldown = rand::gen_range(0.0, 1.0);
-                self.last_move_dir = (0, 1);
-                // Reset position history
-                self.prev_positions = [(self.spawn_pos.x, self.spawn_pos.y); 4];
-                self.pos_index = 0;
+                // Reset pathfinding
+                self.path.clear();
+                self.path_target = None;
+                self.path_recalc_timer = 0.0;
             }
             return;
         }
@@ -268,6 +270,9 @@ impl Bot {
         if self.shoot_cooldown > 0.0 {
             self.shoot_cooldown -= dt;
         }
+
+        // Update path recalc timer
+        self.path_recalc_timer -= dt;
 
         self.move_timer += dt;
 
@@ -295,62 +300,23 @@ impl Bot {
                         self.facing = movement_to_direction(dx, dy);
                     }
                 }
+            } else if self.hostile {
+                // Use BFS pathfinding for hostile bots
+                self.move_with_pathfinding(map, target_pos);
             } else {
-                let move_dir = if self.hostile {
-                    self.calculate_hostile_move(map, target_pos)
-                } else {
-                    // Random direction for non-hostile bots
-                    let directions = [(0, -1), (0, 1), (-1, 0), (1, 0)];
-                    directions[rand::gen_range(0, 4)]
-                };
-
-                let (dx, dy) = move_dir;
+                // Random direction for non-hostile bots
+                let directions = [(0, -1), (0, 1), (-1, 0), (1, 0)];
+                let (dx, dy) = directions[rand::gen_range(0, 4)];
                 let new_x = self.pos.x + dx;
                 let new_y = self.pos.y + dy;
 
-                // Update facing direction
                 if dx != 0 || dy != 0 {
                     self.facing = movement_to_direction(dx, dy);
                 }
 
                 if map.is_walkable_by(new_x, new_y, EntityType::Bot) {
-                    // Check for oscillation: if new position was visited recently, try random
-                    let new_pos = (new_x, new_y);
-                    let oscillating = self
-                        .prev_positions
-                        .iter()
-                        .filter(|&&p| p == new_pos)
-                        .count()
-                        >= 2;
-
-                    if oscillating && self.hostile {
-                        // Break oscillation: pick a random walkable direction
-                        let all_dirs = [(0, -1), (0, 1), (-1, 0), (1, 0)];
-                        let mut shuffled = all_dirs;
-                        for i in (1..4).rev() {
-                            let j = rand::gen_range(0, i + 1);
-                            shuffled.swap(i, j);
-                        }
-                        for (rdx, rdy) in shuffled {
-                            let rx = self.pos.x + rdx;
-                            let ry = self.pos.y + rdy;
-                            if map.is_walkable_by(rx, ry, EntityType::Bot) {
-                                self.pos.x = rx;
-                                self.pos.y = ry;
-                                self.last_move_dir = (rdx, rdy);
-                                self.facing = movement_to_direction(rdx, rdy);
-                                break;
-                            }
-                        }
-                    } else {
-                        self.pos.x = new_x;
-                        self.pos.y = new_y;
-                        self.last_move_dir = (dx, dy);
-                    }
-
-                    // Track position history
-                    self.prev_positions[self.pos_index] = (self.pos.x, self.pos.y);
-                    self.pos_index = (self.pos_index + 1) % 4;
+                    self.pos.x = new_x;
+                    self.pos.y = new_y;
                 }
             }
         }
@@ -359,116 +325,112 @@ impl Bot {
         self.pos.update_visual(dt, speed_mult);
     }
 
-    /// Calculate movement direction for hostile bots with corridor-following behavior.
-    /// Tries multiple directions to navigate around walls in the labyrinth.
-    fn calculate_hostile_move(&self, map: &TileMap, target_pos: Option<(i32, i32)>) -> (i32, i32) {
-        // The reverse of last move - avoid this to prevent oscillation
-        let reverse_dir = (-self.last_move_dir.0, -self.last_move_dir.1);
-
+    /// Move hostile bot using BFS pathfinding
+    fn move_with_pathfinding(&mut self, map: &TileMap, target_pos: Option<(i32, i32)>) {
         let Some((tx, ty)) = target_pos else {
-            // No target - patrol mode: continue in last direction, turn at dead ends
-            if self.last_move_dir != (0, 0)
-                && map.is_walkable_by(
-                    self.pos.x + self.last_move_dir.0,
-                    self.pos.y + self.last_move_dir.1,
-                    EntityType::Bot,
-                )
-            {
-                return self.last_move_dir;
+            // No target - random wander
+            let directions = [(0, -1), (0, 1), (-1, 0), (1, 0)];
+            let (dx, dy) = directions[rand::gen_range(0, 4)];
+            let new_x = self.pos.x + dx;
+            let new_y = self.pos.y + dy;
+            if map.is_walkable_by(new_x, new_y, EntityType::Bot) {
+                self.pos.x = new_x;
+                self.pos.y = new_y;
+                self.facing = movement_to_direction(dx, dy);
             }
-            // Try perpendicular directions first (turn at corners)
-            let perpendiculars = if self.last_move_dir.0 != 0 {
-                [(0, 1), (0, -1)]
+            return;
+        };
+
+        // Recalculate path if target changed, path is empty, or timer expired
+        let need_recalc = self.path_target != Some((tx, ty))
+            || self.path.is_empty()
+            || self.path_recalc_timer <= 0.0;
+
+        if need_recalc {
+            self.path = Self::find_path(self.pos.x, self.pos.y, tx, ty, map);
+            self.path_target = Some((tx, ty));
+            self.path_recalc_timer = 0.5 + rand::gen_range(0.0, 0.3); // Recalc every 0.5-0.8s
+        }
+
+        // Follow the path
+        if let Some((next_x, next_y)) = self.path.front().copied() {
+            let dx = next_x - self.pos.x;
+            let dy = next_y - self.pos.y;
+
+            if map.is_walkable_by(next_x, next_y, EntityType::Bot) {
+                self.pos.x = next_x;
+                self.pos.y = next_y;
+                self.path.pop_front();
+
+                if dx != 0 || dy != 0 {
+                    self.facing = movement_to_direction(dx, dy);
+                }
             } else {
-                [(1, 0), (-1, 0)]
-            };
-            for (dx, dy) in perpendiculars {
-                if map.is_walkable_by(self.pos.x + dx, self.pos.y + dy, EntityType::Bot) {
-                    return (dx, dy);
+                // Path blocked, recalculate next frame
+                self.path.clear();
+            }
+        }
+    }
+
+    /// BFS pathfinding to find shortest path from (sx, sy) to (tx, ty)
+    fn find_path(sx: i32, sy: i32, tx: i32, ty: i32, map: &TileMap) -> VecDeque<(i32, i32)> {
+        const MAX_SEARCH: usize = 2000; // Limit search to prevent lag
+
+        if sx == tx && sy == ty {
+            return VecDeque::new();
+        }
+
+        let mut queue: VecDeque<(i32, i32)> = VecDeque::new();
+        let mut came_from: std::collections::HashMap<(i32, i32), (i32, i32)> =
+            std::collections::HashMap::new();
+
+        queue.push_back((sx, sy));
+        came_from.insert((sx, sy), (sx, sy)); // Mark start as visited
+
+        let directions = [(0, -1), (0, 1), (-1, 0), (1, 0)];
+        let mut found = false;
+        let mut iterations = 0;
+
+        while let Some((cx, cy)) = queue.pop_front() {
+            iterations += 1;
+            if iterations > MAX_SEARCH {
+                break;
+            }
+
+            if cx == tx && cy == ty {
+                found = true;
+                break;
+            }
+
+            for (dx, dy) in directions {
+                let nx = cx + dx;
+                let ny = cy + dy;
+
+                if came_from.contains_key(&(nx, ny)) {
+                    continue;
+                }
+
+                if map.is_walkable_by(nx, ny, EntityType::Bot) {
+                    came_from.insert((nx, ny), (cx, cy));
+                    queue.push_back((nx, ny));
                 }
             }
-            // Last resort: reverse
-            return reverse_dir;
-        };
-
-        let diff_x = tx - self.pos.x;
-        let diff_y = ty - self.pos.y;
-
-        // Direction towards target on each axis
-        let towards_x = if diff_x != 0 {
-            (diff_x.signum(), 0)
-        } else {
-            (0, 0)
-        };
-        let towards_y = if diff_y != 0 {
-            (0, diff_y.signum())
-        } else {
-            (0, 0)
-        };
-
-        // Check which directions towards target are walkable
-        let can_go_x = towards_x != (0, 0)
-            && map.is_walkable_by(
-                self.pos.x + towards_x.0,
-                self.pos.y + towards_x.1,
-                EntityType::Bot,
-            );
-        let can_go_y = towards_y != (0, 0)
-            && map.is_walkable_by(
-                self.pos.x + towards_y.0,
-                self.pos.y + towards_y.1,
-                EntityType::Bot,
-            );
-
-        // If we can move towards target, do it (prefer larger distance axis)
-        if can_go_x && can_go_y {
-            return if diff_x.abs() > diff_y.abs() {
-                towards_x
-            } else {
-                towards_y
-            };
-        }
-        if can_go_x {
-            return towards_x;
-        }
-        if can_go_y {
-            return towards_y;
         }
 
-        // Can't move directly towards target - need to navigate around obstacle
-        // First, try continuing in last direction (corridor following)
-        if self.last_move_dir != (0, 0)
-            && map.is_walkable_by(
-                self.pos.x + self.last_move_dir.0,
-                self.pos.y + self.last_move_dir.1,
-                EntityType::Bot,
-            )
-        {
-            return self.last_move_dir;
+        if !found {
+            return VecDeque::new();
         }
 
-        // Try perpendicular directions (but not reverse)
-        let all_dirs = [(0, -1), (0, 1), (-1, 0), (1, 0)];
-        for (dx, dy) in all_dirs {
-            if (dx, dy) == reverse_dir {
-                continue; // Skip reverse direction for now
-            }
-            if map.is_walkable_by(self.pos.x + dx, self.pos.y + dy, EntityType::Bot) {
-                return (dx, dy);
-            }
+        // Reconstruct path from target back to start
+        let mut path = VecDeque::new();
+        let mut current = (tx, ty);
+
+        while current != (sx, sy) {
+            path.push_front(current);
+            current = came_from[&current];
         }
 
-        // Last resort: reverse direction (dead end)
-        if map.is_walkable_by(
-            self.pos.x + reverse_dir.0,
-            self.pos.y + reverse_dir.1,
-            EntityType::Bot,
-        ) {
-            return reverse_dir;
-        }
-
-        // Completely stuck
-        (0, 0)
+        path
     }
 
     /// Check if hostile bot can shoot and return target direction if so
