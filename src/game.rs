@@ -1,5 +1,6 @@
 use macroquad::prelude::*;
 
+use crate::audio::AudioManager;
 use crate::entity::{Bot, Player};
 use crate::input::{
     get_mouse_position, get_player_input, get_weapon_switch, is_interact_held, is_interact_pressed,
@@ -120,6 +121,7 @@ const DAMAGE_FLASH_DURATION: f32 = 0.35;
 const MESSAGE_DURATION: f32 = 3.0;
 
 pub struct GameState {
+    audio: AudioManager,
     map: TileMap,
     player: Player,
     bots: Vec<Bot>,
@@ -142,10 +144,12 @@ pub struct GameState {
     active_hack: Option<usize>,
     hack_alert: bool,
     game_won: bool,
+    // Hacking sound timer
+    hack_blip_timer: f32,
 }
 
 impl GameState {
-    pub fn new() -> Self {
+    pub fn new(audio: AudioManager) -> Self {
         let map = TileMap::create_labyrinth(MAP_WIDTH, MAP_HEIGHT);
 
         // Place player at a walkable spot
@@ -183,6 +187,7 @@ impl GameState {
         }
 
         Self {
+            audio,
             map,
             player,
             bots,
@@ -203,6 +208,7 @@ impl GameState {
             active_hack: None,
             hack_alert: false,
             game_won: false,
+            hack_blip_timer: 0.0,
         }
     }
 
@@ -236,8 +242,10 @@ impl GameState {
                         };
                         self.active_hack = Some(idx);
                         self.hack_alert = true;
+                        self.hack_blip_timer = 0.0;
                         self.message_timer = MESSAGE_DURATION;
                         self.message_text = "HACKING INITIATED - BOTS ALERTED!";
+                        self.audio.play_hack_start();
                     }
                     break;
                 }
@@ -258,6 +266,13 @@ impl GameState {
                 // Progress only when E is held AND player is nearby
                 if e_held && player_nearby {
                     *progress += dt / HACK_DURATION;
+
+                    // Play periodic blip sound while hacking
+                    self.hack_blip_timer -= dt;
+                    if self.hack_blip_timer <= 0.0 {
+                        self.audio.play_hack_blip();
+                        self.hack_blip_timer = 0.4; // Blip every 0.4 seconds
+                    }
                 }
 
                 // Check for completion
@@ -274,11 +289,13 @@ impl GameState {
                     if all_complete {
                         self.game_won = true;
                         self.hack_alert = false;
+                        self.audio.play_game_win();
                     } else {
                         self.message_timer = MESSAGE_DURATION;
                         self.message_text = "TERMINAL HACKED!";
                         // Reset alert if no active hack
                         self.hack_alert = false;
+                        self.audio.play_hack_success();
                     }
                 }
                 // Check for failure (window expired)
@@ -307,6 +324,7 @@ impl GameState {
         // Show mocking message
         self.message_timer = MESSAGE_DURATION;
         self.message_text = "HACK FAILED! Terminal relocated. Reinforcements incoming!";
+        self.audio.play_hack_fail();
     }
 
     fn update_camera(&mut self) {
@@ -361,6 +379,7 @@ impl GameState {
             if dot > 0.5 {
                 bot.kill();
                 self.score += 1;
+                self.audio.play_hit();
             }
         }
     }
@@ -433,6 +452,7 @@ impl GameState {
                 // Only start a new flash if the previous one has faded
                 if self.player.health < prev_health && self.damage_flash_timer <= 0.0 {
                     self.damage_flash_timer = DAMAGE_FLASH_DURATION;
+                    self.audio.play_player_hit();
                 }
                 self.lava_damage_accumulator -= damage as f32;
             }
@@ -448,7 +468,9 @@ impl GameState {
             let world_mx = mx + self.camera_x;
             let world_my = my + self.camera_y;
 
+            let weapon_index = self.player.current_weapon;
             self.player.weapon_mut().fire();
+            self.audio.play_shoot(weapon_index);
 
             if self.player.weapon().is_melee {
                 let (px, py) = self.player.pos.center_pixel();
@@ -504,6 +526,7 @@ impl GameState {
                     // Hostile bots give more points
                     self.score += if bot.hostile { 3 } else { 1 };
                     bot.kill();
+                    self.audio.play_hit();
                 }
             }
         }
@@ -530,15 +553,19 @@ impl GameState {
                     ItemType::Weapon(kind) => {
                         let weapon = kind.to_weapon();
                         self.player.add_weapon(weapon);
+                        self.audio.play_pickup();
                     }
                     ItemType::HealthPack => {
                         self.player.heal(HEALTH_PACK_AMOUNT);
+                        self.audio.play_health();
                     }
                     ItemType::SpeedBoost => {
                         self.player.speed_boost_timer = SPEED_BOOST_DURATION;
+                        self.audio.play_powerup();
                     }
                     ItemType::Invulnerability => {
                         self.player.invulnerability_timer = INVULNERABILITY_DURATION;
+                        self.audio.play_powerup();
                     }
                 }
             }
@@ -608,6 +635,7 @@ impl GameState {
                     TILE_SIZE * 10.0, // Bot projectile range
                 );
                 self.projectiles.push(projectile);
+                self.audio.play_shoot(1); // Bots use pistol sound
             }
         }
 
@@ -672,6 +700,7 @@ impl GameState {
                 self.player.take_damage(BOT_PROJECTILE_DAMAGE);
                 if self.player.health < prev_health && self.damage_flash_timer <= 0.0 {
                     self.damage_flash_timer = DAMAGE_FLASH_DURATION;
+                    self.audio.play_player_hit();
                 }
             }
         }
@@ -967,11 +996,5 @@ impl GameState {
             24.0,
             WHITE,
         );
-    }
-}
-
-impl Default for GameState {
-    fn default() -> Self {
-        Self::new()
     }
 }

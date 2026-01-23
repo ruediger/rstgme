@@ -1,3 +1,4 @@
+mod audio;
 mod entity;
 mod game;
 mod input;
@@ -8,6 +9,7 @@ mod terminal;
 mod tile_map;
 mod weapon;
 
+use audio::AudioManager;
 use game::GameState;
 use macroquad::prelude::*;
 use sprites::SpriteSheet;
@@ -24,7 +26,8 @@ fn window_conf() -> Conf {
 #[macroquad::main(window_conf)]
 async fn main() {
     let sprites = SpriteSheet::load().await;
-    let mut game = GameState::new();
+    let audio = AudioManager::load().await;
+    let mut game = GameState::new(audio);
 
     loop {
         let dt = get_frame_time();
