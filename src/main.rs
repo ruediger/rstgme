@@ -25,6 +25,9 @@ fn window_conf() -> Conf {
 
 #[macroquad::main(window_conf)]
 async fn main() {
+    // Seed random number generator with current time
+    rand::srand(macroquad::miniquad::date::now() as u64);
+
     let sprites = SpriteSheet::load().await;
     let audio = AudioManager::load().await;
     let mut game = GameState::new(audio);
