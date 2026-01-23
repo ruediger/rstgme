@@ -14,6 +14,7 @@ pub struct AudioManager {
     rifle_shot: Option<Sound>,
     hit: Option<Sound>,
     player_hit: Option<Sound>,
+    player_death: Option<Sound>,
     // Pickups
     pickup: Option<Sound>,
     health: Option<Sound>,
@@ -47,6 +48,7 @@ impl AudioManager {
                 rifle_shot: None,
                 hit: None,
                 player_hit: None,
+                player_death: None,
                 pickup: None,
                 health: None,
                 powerup: None,
@@ -68,6 +70,7 @@ impl AudioManager {
             rifle_shot: try_load_sound(&generate_rifle_shot()).await,
             hit: try_load_sound(&generate_hit()).await,
             player_hit: try_load_sound(&generate_player_hit()).await,
+            player_death: try_load_sound(&generate_player_death()).await,
             // Pickup sounds
             pickup: try_load_sound(&generate_pickup()).await,
             health: try_load_sound(&generate_health()).await,
@@ -108,6 +111,10 @@ impl AudioManager {
 
     pub fn play_player_hit(&self) {
         self.play(&self.player_hit);
+    }
+
+    pub fn play_player_death(&self) {
+        self.play(&self.player_death);
     }
 
     pub fn play_pickup(&self) {
@@ -312,6 +319,22 @@ fn generate_player_hit() -> Vec<u8> {
     let mid = sine_wave(120.0, 0.1, 0.3);
     apply_envelope(&mut low, 0.001, 0.12);
     let samples = mix(&low, &mid);
+    generate_wav(&samples)
+}
+
+fn generate_player_death() -> Vec<u8> {
+    // Sad trombone / womp womp descending notes
+    let note1 = sine_wave(311.0, 0.25, 0.5); // Eb4
+    let note2 = sine_wave(277.0, 0.25, 0.5); // Db4
+    let note3 = sine_wave(261.0, 0.25, 0.5); // C4
+    let note4 = sine_wave(233.0, 0.5, 0.6); // Bb3 (longer, lower)
+
+    let mut samples = Vec::new();
+    samples.extend_from_slice(&note1);
+    samples.extend_from_slice(&note2);
+    samples.extend_from_slice(&note3);
+    samples.extend_from_slice(&note4);
+    apply_envelope(&mut samples, 0.02, 0.15);
     generate_wav(&samples)
 }
 

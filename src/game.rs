@@ -223,6 +223,20 @@ impl GameState {
         }
     }
 
+    fn random_death_message() -> &'static str {
+        const MESSAGES: &[&str] = &[
+            "YOU DIED! Git gud, scrub.",
+            "WASTED! Maybe try a different career?",
+            "ELIMINATED! The bots send their regards.",
+            "DESTROYED! That was embarrassing.",
+            "TERMINATED! Have you tried not dying?",
+            "FLATLINED! Your score has been reset to match your skill level.",
+            "GAME OVER! The respawn of shame awaits.",
+            "OBLITERATED! Even the bots are laughing.",
+        ];
+        MESSAGES[rand::gen_range(0, MESSAGES.len())]
+    }
+
     fn update_hacking(&mut self, dt: f32) {
         let player_pos = (self.player.pos.x, self.player.pos.y);
         let e_held = is_interact_held();
@@ -425,6 +439,11 @@ impl GameState {
             let (x, y) = Self::find_walkable_spot(&self.map);
             self.player.respawn(x, y);
             self.lava_damage_accumulator = 0.0;
+            // Reset score and show death message
+            self.score = 0;
+            self.message_timer = MESSAGE_DURATION;
+            self.message_text = Self::random_death_message();
+            self.audio.play_player_death();
         }
 
         // Handle weapon switching
