@@ -50,6 +50,7 @@ pub mod direction {
 
 pub struct SpriteSheet {
     texture: Texture2D,
+    splash: Option<Texture2D>,
 }
 
 impl SpriteSheet {
@@ -58,7 +59,51 @@ impl SpriteSheet {
             .await
             .expect("Failed to load sprites.png");
         texture.set_filter(FilterMode::Nearest);
-        Self { texture }
+
+        // Try to load splash screen (optional)
+        let splash = load_texture("data/splash.png").await.ok();
+        if let Some(ref tex) = splash {
+            tex.set_filter(FilterMode::Nearest);
+        }
+
+        Self { texture, splash }
+    }
+
+    /// Draw splash screen scaled to fill the screen, with optional dimming
+    pub fn draw_splash(&self, dim_amount: f32) {
+        if let Some(ref splash) = self.splash {
+            let sw = screen_width();
+            let sh = screen_height();
+            let tex_w = splash.width();
+            let tex_h = splash.height();
+
+            // Scale to cover the screen while maintaining aspect ratio
+            let scale_x = sw / tex_w;
+            let scale_y = sh / tex_h;
+            let scale = scale_x.max(scale_y);
+
+            let dest_w = tex_w * scale;
+            let dest_h = tex_h * scale;
+
+            // Center the image
+            let x = (sw - dest_w) / 2.0;
+            let y = (sh - dest_h) / 2.0;
+
+            // Apply dimming via color tint
+            let brightness = 1.0 - dim_amount;
+            let color = Color::new(brightness, brightness, brightness, 1.0);
+
+            draw_texture_ex(
+                splash,
+                x,
+                y,
+                color,
+                DrawTextureParams {
+                    dest_size: Some(Vec2::new(dest_w, dest_h)),
+                    ..Default::default()
+                },
+            );
+        }
     }
 
     /// Get source rect for a tile (row 0)

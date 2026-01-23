@@ -4,7 +4,7 @@ use crate::audio::AudioManager;
 use crate::entity::{Bot, Player};
 use crate::input::{
     get_mouse_position, get_player_input, get_weapon_switch, is_interact_held, is_interact_pressed,
-    is_shooting,
+    is_menu_down, is_menu_escape, is_menu_select, is_menu_up, is_shooting,
 };
 use crate::item::{Item, ItemType};
 use crate::projectile::Projectile;
@@ -26,6 +26,60 @@ const SPEED_BOOST_DURATION: f32 = 5.0;
 const INVULNERABILITY_DURATION: f32 = 3.0;
 const MELEE_SWING_DURATION: f32 = 0.15;
 const MELEE_SWING_ARC: f32 = std::f32::consts::PI * 0.6; // ~108 degrees
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum GameScreen {
+    MainMenu,
+    Playing,
+    Paused,
+    Controls,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum MenuItem {
+    Resume,
+    NewGame,
+    Controls,
+    Audio,
+    Quit,
+}
+
+impl MenuItem {
+    fn main_menu_items() -> &'static [MenuItem] {
+        &[
+            MenuItem::NewGame,
+            MenuItem::Controls,
+            MenuItem::Audio,
+            MenuItem::Quit,
+        ]
+    }
+
+    fn pause_menu_items() -> &'static [MenuItem] {
+        &[
+            MenuItem::Resume,
+            MenuItem::NewGame,
+            MenuItem::Controls,
+            MenuItem::Audio,
+            MenuItem::Quit,
+        ]
+    }
+
+    fn label(&self, audio_enabled: bool) -> &'static str {
+        match self {
+            MenuItem::Resume => "Resume",
+            MenuItem::NewGame => "New Game",
+            MenuItem::Controls => "Controls",
+            MenuItem::Audio => {
+                if audio_enabled {
+                    "Audio: ON"
+                } else {
+                    "Audio: OFF"
+                }
+            }
+            MenuItem::Quit => "Quit",
+        }
+    }
+}
 
 struct MeleeSwing {
     x: f32,
@@ -121,6 +175,8 @@ const DAMAGE_FLASH_DURATION: f32 = 0.35;
 const MESSAGE_DURATION: f32 = 3.0;
 
 pub struct GameState {
+    screen: GameScreen,
+    menu_selection: usize,
     audio: AudioManager,
     map: TileMap,
     player: Player,
@@ -187,6 +243,8 @@ impl GameState {
         }
 
         Self {
+            screen: GameScreen::MainMenu,
+            menu_selection: 0,
             audio,
             map,
             player,
@@ -221,6 +279,97 @@ impl GameState {
                 return (x, y);
             }
         }
+    }
+
+    fn update_menu(&mut self, items: &[MenuItem]) {
+        // Navigate menu
+        if is_menu_up() && self.menu_selection > 0 {
+            self.menu_selection -= 1;
+        }
+        if is_menu_down() && self.menu_selection < items.len() - 1 {
+            self.menu_selection += 1;
+        }
+
+        // Handle selection
+        if is_menu_select() {
+            let selected = items[self.menu_selection];
+            match selected {
+                MenuItem::Resume => {
+                    self.screen = GameScreen::Playing;
+                }
+                MenuItem::NewGame => {
+                    self.reset_game();
+                    self.screen = GameScreen::Playing;
+                }
+                MenuItem::Controls => {
+                    self.screen = GameScreen::Controls;
+                }
+                MenuItem::Audio => {
+                    self.audio.toggle_mute();
+                }
+                MenuItem::Quit => {
+                    std::process::exit(0);
+                }
+            }
+        }
+
+        // ESC from main menu does nothing, from pause resumes
+        if is_menu_escape() && self.screen == GameScreen::Paused {
+            self.screen = GameScreen::Playing;
+        }
+    }
+
+    fn reset_game(&mut self) {
+        // Generate new map
+        self.map = TileMap::create_labyrinth(MAP_WIDTH, MAP_HEIGHT);
+
+        // Reset player
+        let (px, py) = Self::find_walkable_spot(&self.map);
+        self.player = Player::new(px, py);
+
+        // Reset bots
+        self.bots.clear();
+        for _ in 0..NUM_BOTS {
+            let (x, y) = Self::find_walkable_spot(&self.map);
+            self.bots.push(Bot::new(x, y));
+        }
+        for _ in 0..NUM_HOSTILE_BOTS {
+            let (x, y) = Self::find_walkable_spot(&self.map);
+            self.bots.push(Bot::new_hostile(x, y));
+        }
+
+        // Reset items
+        self.items.clear();
+        for _ in 0..NUM_FLOOR_ITEMS {
+            let (x, y) = Self::find_walkable_spot(&self.map);
+            self.items.push(Item::random_floor_item(x, y));
+        }
+
+        // Reset terminals
+        let num_terminals = rand::gen_range(1, 4);
+        self.terminals.clear();
+        for _ in 0..num_terminals {
+            let (x, y) = Self::find_walkable_spot(&self.map);
+            self.terminals.push(Terminal::new(x, y));
+        }
+
+        // Reset game state
+        self.projectiles.clear();
+        self.melee_swings.clear();
+        self.score = 0;
+        self.camera_x = 0.0;
+        self.camera_y = 0.0;
+        self.lava_damage_accumulator = 0.0;
+        self.damage_flash_timer = 0.0;
+        self.initial_non_hostile = self.bots.iter().filter(|b| !b.hostile).count();
+        self.shown_half_infected = false;
+        self.shown_all_infected = false;
+        self.message_timer = 0.0;
+        self.message_text = "";
+        self.active_hack = None;
+        self.hack_alert = false;
+        self.game_won = false;
+        self.hack_blip_timer = 0.0;
     }
 
     fn random_death_message() -> &'static str {
@@ -434,6 +583,37 @@ impl GameState {
     }
 
     pub fn update(&mut self, dt: f32) {
+        // Handle screen-specific updates
+        match self.screen {
+            GameScreen::MainMenu => {
+                self.update_menu(MenuItem::main_menu_items());
+                return;
+            }
+            GameScreen::Paused => {
+                self.update_menu(MenuItem::pause_menu_items());
+                return;
+            }
+            GameScreen::Controls => {
+                if is_menu_escape() || is_menu_select() {
+                    // Go back to previous menu (pause if game started, main menu otherwise)
+                    self.screen = if self.game_won {
+                        GameScreen::MainMenu
+                    } else {
+                        GameScreen::Paused
+                    };
+                }
+                return;
+            }
+            GameScreen::Playing => {
+                // Handle ESC to pause
+                if is_menu_escape() {
+                    self.screen = GameScreen::Paused;
+                    self.menu_selection = 0;
+                    return;
+                }
+            }
+        }
+
         // Check if player is dead and respawn
         if !self.player.is_alive() {
             let (x, y) = Self::find_walkable_spot(&self.map);
@@ -728,6 +908,29 @@ impl GameState {
     pub fn draw(&self, sprites: &SpriteSheet) {
         clear_background(Color::from_rgba(30, 30, 40, 255));
 
+        // Handle menu screens
+        match self.screen {
+            GameScreen::MainMenu => {
+                self.draw_menu("RSTGME", MenuItem::main_menu_items(), sprites, false);
+                return;
+            }
+            GameScreen::Paused => {
+                // Draw game in background (dimmed)
+                self.draw_game(sprites);
+                self.draw_menu("PAUSED", MenuItem::pause_menu_items(), sprites, true);
+                return;
+            }
+            GameScreen::Controls => {
+                self.draw_controls(sprites);
+                return;
+            }
+            GameScreen::Playing => {}
+        }
+
+        self.draw_game(sprites);
+    }
+
+    fn draw_game(&self, sprites: &SpriteSheet) {
         self.map.draw(self.camera_x, self.camera_y, sprites);
 
         // Draw aim line (in screen space)
@@ -1014,6 +1217,207 @@ impl GameState {
             y + 50.0,
             24.0,
             WHITE,
+        );
+    }
+
+    fn draw_menu(&self, title: &str, items: &[MenuItem], sprites: &SpriteSheet, is_pause: bool) {
+        // Draw splash background for main menu, or overlay for pause
+        if is_pause {
+            draw_rectangle(
+                0.0,
+                0.0,
+                screen_width(),
+                screen_height(),
+                Color::from_rgba(0, 0, 0, 180),
+            );
+        } else {
+            // Main menu - draw splash with slight dimming
+            sprites.draw_splash(0.3);
+        }
+
+        let center_x = screen_width() / 2.0;
+        let start_y = screen_height() / 3.0;
+
+        // Draw title with classic game style
+        let title_size = 64.0;
+        let title_width = measure_text(title, None, title_size as u16, 1.0).width;
+
+        // Title shadow
+        draw_text(
+            title,
+            center_x - title_width / 2.0 + 4.0,
+            start_y + 4.0,
+            title_size,
+            Color::from_rgba(100, 0, 0, 255),
+        );
+        // Title main
+        draw_text(
+            title,
+            center_x - title_width / 2.0,
+            start_y,
+            title_size,
+            Color::from_rgba(200, 50, 50, 255),
+        );
+
+        // Draw menu items
+        let item_size = 32.0;
+        let item_spacing = 45.0;
+        let items_start_y = start_y + 80.0;
+        let audio_muted = self.audio.is_muted();
+
+        for (i, item) in items.iter().enumerate() {
+            let label = item.label(!audio_muted);
+            let text_width = measure_text(label, None, item_size as u16, 1.0).width;
+            let x = center_x - text_width / 2.0;
+            let y = items_start_y + i as f32 * item_spacing;
+
+            let is_selected = i == self.menu_selection;
+
+            // Selected item has a highlight background
+            if is_selected {
+                draw_rectangle(
+                    x - 20.0,
+                    y - item_size + 5.0,
+                    text_width + 40.0,
+                    item_size + 5.0,
+                    Color::from_rgba(200, 50, 50, 100),
+                );
+            }
+
+            // Shadow
+            draw_text(
+                label,
+                x + 2.0,
+                y + 2.0,
+                item_size,
+                Color::from_rgba(0, 0, 0, 200),
+            );
+
+            // Main text
+            let color = if is_selected {
+                Color::from_rgba(255, 255, 100, 255) // Yellow for selected
+            } else {
+                Color::from_rgba(200, 200, 200, 255) // Gray for others
+            };
+            draw_text(label, x, y, item_size, color);
+
+            // Selection indicator
+            if is_selected {
+                draw_text(
+                    ">",
+                    x - 25.0,
+                    y,
+                    item_size,
+                    Color::from_rgba(255, 255, 100, 255),
+                );
+                draw_text(
+                    "<",
+                    x + text_width + 10.0,
+                    y,
+                    item_size,
+                    Color::from_rgba(255, 255, 100, 255),
+                );
+            }
+        }
+
+        // Draw navigation hint
+        let hint = "W/S or Arrows: Navigate  |  Enter/Space: Select";
+        let hint_size = 16.0;
+        let hint_width = measure_text(hint, None, hint_size as u16, 1.0).width;
+        draw_text(
+            hint,
+            center_x - hint_width / 2.0,
+            screen_height() - 40.0,
+            hint_size,
+            Color::from_rgba(150, 150, 150, 255),
+        );
+    }
+
+    fn draw_controls(&self, sprites: &SpriteSheet) {
+        // Draw splash background with heavier dimming for readability
+        sprites.draw_splash(0.6);
+
+        let center_x = screen_width() / 2.0;
+        let start_y = 80.0;
+
+        // Title
+        let title = "CONTROLS";
+        let title_size = 48.0;
+        let title_width = measure_text(title, None, title_size as u16, 1.0).width;
+        draw_text(
+            title,
+            center_x - title_width / 2.0,
+            start_y,
+            title_size,
+            Color::from_rgba(200, 50, 50, 255),
+        );
+
+        // Controls list
+        let controls = [
+            ("Movement", "W A S D  or  Arrow Keys"),
+            ("Aim", "Mouse"),
+            ("Shoot", "Left Mouse Button"),
+            ("Switch Weapon", "1-5 Keys"),
+            ("Interact/Hack", "E (hold for hacking)"),
+            ("Pause", "ESC"),
+        ];
+
+        let line_size = 24.0;
+        let line_spacing = 35.0;
+        let controls_start_y = start_y + 60.0;
+        let label_x = center_x - 200.0;
+        let value_x = center_x + 20.0;
+
+        for (i, (label, value)) in controls.iter().enumerate() {
+            let y = controls_start_y + i as f32 * line_spacing;
+            draw_text(
+                label,
+                label_x,
+                y,
+                line_size,
+                Color::from_rgba(150, 150, 150, 255),
+            );
+            draw_text(value, value_x, y, line_size, WHITE);
+        }
+
+        // Objective section
+        let objective_y = controls_start_y + controls.len() as f32 * line_spacing + 40.0;
+        draw_text(
+            "OBJECTIVE",
+            center_x - 60.0,
+            objective_y,
+            32.0,
+            Color::from_rgba(200, 50, 50, 255),
+        );
+
+        let objectives = [
+            "- Hack all terminals by holding E near them",
+            "- Survive the bot onslaught during hacking",
+            "- Hostile bots (red) will attack you and infect others",
+            "- Destroy crates and walls to find weapons and powerups",
+        ];
+
+        for (i, line) in objectives.iter().enumerate() {
+            let y = objective_y + 40.0 + i as f32 * 28.0;
+            draw_text(
+                line,
+                center_x - 250.0,
+                y,
+                20.0,
+                Color::from_rgba(200, 200, 200, 255),
+            );
+        }
+
+        // Back hint
+        let hint = "Press ESC or Enter to go back";
+        let hint_size = 18.0;
+        let hint_width = measure_text(hint, None, hint_size as u16, 1.0).width;
+        draw_text(
+            hint,
+            center_x - hint_width / 2.0,
+            screen_height() - 40.0,
+            hint_size,
+            Color::from_rgba(150, 150, 150, 255),
         );
     }
 }

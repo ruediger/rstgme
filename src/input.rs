@@ -65,6 +65,26 @@ pub fn is_interact_held() -> bool {
     is_key_down(KeyCode::E)
 }
 
+/// Menu navigation - move up
+pub fn is_menu_up() -> bool {
+    is_key_pressed(KeyCode::W) || is_key_pressed(KeyCode::Up)
+}
+
+/// Menu navigation - move down
+pub fn is_menu_down() -> bool {
+    is_key_pressed(KeyCode::S) || is_key_pressed(KeyCode::Down)
+}
+
+/// Menu selection - confirm
+pub fn is_menu_select() -> bool {
+    is_key_pressed(KeyCode::Enter) || is_key_pressed(KeyCode::Space)
+}
+
+/// Menu escape - back/pause
+pub fn is_menu_escape() -> bool {
+    is_key_pressed(KeyCode::Escape)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -6,6 +6,7 @@ const SAMPLE_RATE: u32 = 44100;
 /// All sounds are optional - if audio init fails, game continues silently.
 pub struct AudioManager {
     enabled: bool,
+    muted: bool,
     // Combat
     knife_swing: Option<Sound>,
     pistol_shot: Option<Sound>,
@@ -41,6 +42,7 @@ impl AudioManager {
             eprintln!("Audio initialization failed - running without sound");
             return Self {
                 enabled: false,
+                muted: false,
                 knife_swing: None,
                 pistol_shot: None,
                 shotgun_blast: None,
@@ -62,6 +64,7 @@ impl AudioManager {
 
         Self {
             enabled: true,
+            muted: false,
             // Combat sounds
             knife_swing: try_load_sound(&generate_knife_swing()).await,
             pistol_shot: test_sound, // Reuse the test sound
@@ -85,13 +88,24 @@ impl AudioManager {
     }
 
     fn play(&self, sound: &Option<Sound>) {
+        if self.muted {
+            return;
+        }
         if let Some(s) = sound {
             play_sound_once(s);
         }
     }
 
+    pub fn toggle_mute(&mut self) {
+        self.muted = !self.muted;
+    }
+
+    pub fn is_muted(&self) -> bool {
+        self.muted
+    }
+
     pub fn play_shoot(&self, weapon_index: usize) {
-        if !self.enabled {
+        if !self.enabled || self.muted {
             return;
         }
         let sound = match weapon_index {
