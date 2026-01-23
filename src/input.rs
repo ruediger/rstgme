@@ -55,6 +55,16 @@ pub fn get_weapon_switch() -> Option<usize> {
     }
 }
 
+/// Check if player pressed the interact key (E)
+pub fn is_interact_pressed() -> bool {
+    is_key_pressed(KeyCode::E)
+}
+
+/// Check if player is holding the interact key (E)
+pub fn is_interact_held() -> bool {
+    is_key_down(KeyCode::E)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

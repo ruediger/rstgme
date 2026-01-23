@@ -62,8 +62,8 @@ There should be rotated versions of these entities with 45 degree rotations.
 
 ```
 +------------------------------------------------------------------+
-| Row 0: Tiles (11 × 32px = 352px)                                 |
-| [Floor][Wall][Sand][Water][Lava][Pit][DoorP][DoorB][Door+][Crate][CrackWall] |
+| Row 0: Tiles (13 × 32px = 352px)                                 |
+| [Floor][Wall][Sand][Water][Lava][Pit][DoorP][DoorB][Door+][Crate][CrackWall][X][Terminal] |
 +------------------------------------------------------------------+
 | Row 1: Entities (8 × 32px)                                       |
 | [Player...][empty...]                                            |
@@ -72,8 +72,8 @@ There should be rotated versions of these entities with 45 degree rotations.
 | [Bot...][empty...]                                               |
 +------------------------------------------------------------------+
 | Row 3: Items (7 × 16px, padded to 32px height)                   |
-| [Pistol][Shotgun][MP][Rifle][Health][Speed][Invuln]              |
-+------------------------------------------------------------------+
+gggg| [Pistol][Shotgun][MP][Rifle][Health][Speed][Invuln]              |
++------------------------------------------------------------------+\
 | Row 4: Effects (1 × 8px, padded)                                 |
 | [Bullet]                                                         |
 +------------------------------------------------------------------+

@@ -4,6 +4,7 @@ mod input;
 mod item;
 mod projectile;
 mod sprites;
+mod terminal;
 mod tile_map;
 mod weapon;
 

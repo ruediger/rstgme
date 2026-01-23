@@ -30,6 +30,11 @@ pub mod items {
     pub const BULLET: u32 = 15;
 }
 
+/// Special sprites (row 1, after player directions)
+pub mod special {
+    pub const TERMINAL_COL: u32 = 12; // Column 12, row 1
+}
+
 /// Direction indices for entity rotations (8 directions)
 /// Order: Down, Down-Right, Right, Up-Right, Up, Up-Left, Left, Down-Left
 pub mod direction {
@@ -207,6 +212,46 @@ impl SpriteSheet {
             DrawTextureParams {
                 source: Some(src),
                 dest_size: Some(Vec2::new(display_size, display_size)),
+                ..Default::default()
+            },
+        );
+    }
+
+    /// Get source rect for terminal sprite (row 0, col 12)
+    fn terminal_rect(&self) -> Rect {
+        Rect::new(
+            special::TERMINAL_COL as f32 * TILE_SIZE,
+            0.0,
+            TILE_SIZE,
+            TILE_SIZE,
+        )
+    }
+
+    /// Draw terminal at the given screen position
+    pub fn draw_terminal(&self, x: f32, y: f32) {
+        let src = self.terminal_rect();
+        draw_texture_ex(
+            &self.texture,
+            x,
+            y,
+            WHITE,
+            DrawTextureParams {
+                source: Some(src),
+                ..Default::default()
+            },
+        );
+    }
+
+    /// Draw terminal with a tint (for completed terminals)
+    pub fn draw_terminal_tinted(&self, x: f32, y: f32, tint: Color) {
+        let src = self.terminal_rect();
+        draw_texture_ex(
+            &self.texture,
+            x,
+            y,
+            tint,
+            DrawTextureParams {
+                source: Some(src),
                 ..Default::default()
             },
         );

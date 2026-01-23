@@ -1,10 +1,14 @@
 use macroquad::prelude::*;
 
 use crate::entity::{Bot, Player};
-use crate::input::{get_mouse_position, get_player_input, get_weapon_switch, is_shooting};
+use crate::input::{
+    get_mouse_position, get_player_input, get_weapon_switch, is_interact_held, is_interact_pressed,
+    is_shooting,
+};
 use crate::item::{Item, ItemType};
 use crate::projectile::Projectile;
 use crate::sprites::SpriteSheet;
+use crate::terminal::{FAIL_BOT_SPAWN, HACK_DURATION, HACK_WINDOW, HackState, Terminal};
 use crate::tile_map::{EntityType, TILE_SIZE, TileMap, TileType};
 
 const BOT_HITBOX_SIZE: f32 = TILE_SIZE - 8.0;
@@ -133,6 +137,11 @@ pub struct GameState {
     shown_all_infected: bool,
     message_timer: f32,
     message_text: &'static str,
+    // Terminal hacking system
+    terminals: Vec<Terminal>,
+    active_hack: Option<usize>,
+    hack_alert: bool,
+    game_won: bool,
 }
 
 impl GameState {
@@ -165,6 +174,14 @@ impl GameState {
         // Count initial non-hostile bots for infection tracking
         let initial_non_hostile = bots.iter().filter(|b| !b.hostile).count();
 
+        // Spawn 1-3 terminals at random floor positions
+        let num_terminals = rand::gen_range(1, 4);
+        let mut terminals = Vec::with_capacity(num_terminals);
+        for _ in 0..num_terminals {
+            let (x, y) = Self::find_walkable_spot(&map);
+            terminals.push(Terminal::new(x, y));
+        }
+
         Self {
             map,
             player,
@@ -182,6 +199,10 @@ impl GameState {
             shown_all_infected: false,
             message_timer: 0.0,
             message_text: "",
+            terminals,
+            active_hack: None,
+            hack_alert: false,
+            game_won: false,
         }
     }
 
@@ -194,6 +215,98 @@ impl GameState {
                 return (x, y);
             }
         }
+    }
+
+    fn update_hacking(&mut self, dt: f32) {
+        let player_pos = (self.player.pos.x, self.player.pos.y);
+        let e_held = is_interact_held();
+
+        // Check for E key press to start hacking a new terminal
+        if is_interact_pressed() {
+            for (idx, terminal) in self.terminals.iter_mut().enumerate() {
+                if terminal.state == HackState::Complete {
+                    continue;
+                }
+                if terminal.is_player_nearby(player_pos.0, player_pos.1) {
+                    if terminal.state == HackState::Idle {
+                        // Start hacking
+                        terminal.state = HackState::InProgress {
+                            progress: 0.0,
+                            elapsed: 0.0,
+                        };
+                        self.active_hack = Some(idx);
+                        self.hack_alert = true;
+                        self.message_timer = MESSAGE_DURATION;
+                        self.message_text = "HACKING INITIATED - BOTS ALERTED!";
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Update active hack progress (only while E is held, but elapsed always ticks)
+        if let Some(terminal_idx) = self.active_hack {
+            // Check if player is nearby before mutable borrow
+            let player_nearby =
+                self.terminals[terminal_idx].is_player_nearby(player_pos.0, player_pos.1);
+            let terminal = &mut self.terminals[terminal_idx];
+
+            if let HackState::InProgress { progress, elapsed } = &mut terminal.state {
+                // Elapsed time always ticks (real-time window)
+                *elapsed += dt;
+
+                // Progress only when E is held AND player is nearby
+                if e_held && player_nearby {
+                    *progress += dt / HACK_DURATION;
+                }
+
+                // Check for completion
+                if *progress >= 1.0 {
+                    terminal.state = HackState::Complete;
+                    self.active_hack = None;
+
+                    // Check if all terminals are hacked
+                    let all_complete = self
+                        .terminals
+                        .iter()
+                        .all(|t| t.state == HackState::Complete);
+
+                    if all_complete {
+                        self.game_won = true;
+                        self.hack_alert = false;
+                    } else {
+                        self.message_timer = MESSAGE_DURATION;
+                        self.message_text = "TERMINAL HACKED!";
+                        // Reset alert if no active hack
+                        self.hack_alert = false;
+                    }
+                }
+                // Check for failure (window expired)
+                else if *elapsed >= HACK_WINDOW {
+                    self.handle_hack_failure(terminal_idx);
+                }
+            }
+        }
+    }
+
+    fn handle_hack_failure(&mut self, terminal_idx: usize) {
+        // Relocate terminal to new position
+        let (new_x, new_y) = Self::find_walkable_spot(&self.map);
+        self.terminals[terminal_idx].relocate(new_x, new_y);
+
+        // Spawn extra hostile bots
+        for _ in 0..FAIL_BOT_SPAWN {
+            let (x, y) = Self::find_walkable_spot(&self.map);
+            self.bots.push(Bot::new_hostile(x, y));
+        }
+
+        // Clear hacking state
+        self.active_hack = None;
+        self.hack_alert = false;
+
+        // Show mocking message
+        self.message_timer = MESSAGE_DURATION;
+        self.message_text = "HACK FAILED! Terminal relocated. Reinforcements incoming!";
     }
 
     fn update_camera(&mut self) {
@@ -432,6 +545,11 @@ impl GameState {
         }
         self.items.retain(|i| i.alive);
 
+        // Update terminal hacking
+        if !self.game_won {
+            self.update_hacking(dt);
+        }
+
         // Collect non-hostile bot positions for hostile bots to target
         let non_hostile_positions: Vec<(i32, i32)> = self
             .bots
@@ -443,23 +561,34 @@ impl GameState {
         let player_pos = (self.player.pos.x, self.player.pos.y);
         const PLAYER_AGGRO_RANGE: i32 = 6; // Switch to player when this close
 
+        // Get terminal position if actively hacking
+        let hack_target: Option<(i32, i32)> = self
+            .active_hack
+            .map(|idx| self.terminals[idx].tile_position());
+
         for bot in &mut self.bots {
             // Hostile bots target player if close, otherwise hunt non-hostile bots
+            // During hack alert, ALL hostile bots swarm the terminal being hacked
             let target = if bot.hostile {
-                let (bx, by) = (bot.pos.x, bot.pos.y);
-                let player_dist = (player_pos.0 - bx).abs() + (player_pos.1 - by).abs();
-
-                // Chase player if within aggro range
-                if player_dist <= PLAYER_AGGRO_RANGE {
-                    Some(player_pos)
-                } else if !non_hostile_positions.is_empty() {
-                    // Otherwise find nearest non-hostile bot to infect
-                    let nearest = non_hostile_positions
-                        .iter()
-                        .min_by_key(|(x, y)| (x - bx).abs() + (y - by).abs());
-                    nearest.copied()
+                if self.hack_alert {
+                    // During active hack, all hostile bots swarm the terminal
+                    hack_target.or(Some(player_pos))
                 } else {
-                    Some(player_pos)
+                    let (bx, by) = (bot.pos.x, bot.pos.y);
+                    let player_dist = (player_pos.0 - bx).abs() + (player_pos.1 - by).abs();
+
+                    // Chase player if within aggro range
+                    if player_dist <= PLAYER_AGGRO_RANGE {
+                        Some(player_pos)
+                    } else if !non_hostile_positions.is_empty() {
+                        // Otherwise find nearest non-hostile bot to infect
+                        let nearest = non_hostile_positions
+                            .iter()
+                            .min_by_key(|(x, y)| (x - bx).abs() + (y - by).abs());
+                        nearest.copied()
+                    } else {
+                        Some(player_pos)
+                    }
                 }
             } else {
                 Some(player_pos)
@@ -584,6 +713,13 @@ impl GameState {
         // Draw items
         for item in &self.items {
             item.draw(self.camera_x, self.camera_y, sprites);
+        }
+
+        // Draw terminals
+        let player_pos = (self.player.pos.x, self.player.pos.y);
+        for terminal in &self.terminals {
+            terminal.draw(self.camera_x, self.camera_y, sprites);
+            terminal.draw_prompt(self.camera_x, self.camera_y, player_pos.0, player_pos.1);
         }
 
         // Draw damage flash overlay
@@ -725,6 +861,112 @@ impl GameState {
             };
             draw_text(text, x, y, font_size, color);
         }
+
+        // Draw terminal counter (top right)
+        let terminals_complete = self
+            .terminals
+            .iter()
+            .filter(|t| t.state == HackState::Complete)
+            .count();
+        let terminal_text = format!("Terminals: {}/{}", terminals_complete, self.terminals.len());
+        draw_text(
+            &terminal_text,
+            screen_width() - 150.0,
+            30.0,
+            20.0,
+            Color::from_rgba(100, 200, 255, 255),
+        );
+
+        // Draw hack progress bar if actively hacking
+        if let Some(terminal_idx) = self.active_hack
+            && let HackState::InProgress { progress, elapsed } = self.terminals[terminal_idx].state
+        {
+            self.draw_hack_progress(progress, elapsed);
+        }
+
+        // Draw win screen if game won
+        if self.game_won {
+            self.draw_win_screen();
+        }
+    }
+
+    fn draw_hack_progress(&self, progress: f32, elapsed: f32) {
+        let bar_width = 250.0;
+        let bar_height = 24.0;
+        let x = (screen_width() - bar_width) / 2.0;
+        let y = screen_height() - 100.0;
+
+        // Background
+        draw_rectangle(
+            x - 4.0,
+            y - 4.0,
+            bar_width + 8.0,
+            bar_height + 8.0,
+            Color::from_rgba(0, 0, 0, 200),
+        );
+
+        // Progress bar color based on time remaining
+        let time_ratio = elapsed / HACK_WINDOW;
+        let color = if time_ratio < 0.5 {
+            Color::from_rgba(80, 200, 80, 255) // Green
+        } else if time_ratio < 0.75 {
+            Color::from_rgba(200, 200, 80, 255) // Yellow
+        } else {
+            Color::from_rgba(200, 80, 80, 255) // Red (urgent)
+        };
+
+        draw_rectangle(x, y, bar_width * progress, bar_height, color);
+
+        // Border
+        draw_rectangle_lines(x, y, bar_width, bar_height, 2.0, WHITE);
+
+        // Text
+        draw_text("HACKING...", x, y - 8.0, 20.0, WHITE);
+
+        // Time remaining
+        let time_left = HACK_WINDOW - elapsed;
+        let time_color = if time_ratio > 0.75 {
+            Color::from_rgba(255, 80, 80, 255)
+        } else {
+            WHITE
+        };
+        draw_text(
+            &format!("{:.1}s", time_left),
+            x + bar_width - 45.0,
+            y - 8.0,
+            18.0,
+            time_color,
+        );
+    }
+
+    fn draw_win_screen(&self) {
+        // Semi-transparent overlay
+        draw_rectangle(
+            0.0,
+            0.0,
+            screen_width(),
+            screen_height(),
+            Color::from_rgba(0, 50, 0, 180),
+        );
+
+        let text = "SYSTEM HACKED - YOU WIN!";
+        let font_size = 48.0;
+        let text_width = measure_text(text, None, font_size as u16, 1.0).width;
+        let x = (screen_width() - text_width) / 2.0;
+        let y = screen_height() / 2.0;
+
+        // Shadow
+        draw_text(text, x + 3.0, y + 3.0, font_size, BLACK);
+        // Main text
+        draw_text(text, x, y, font_size, Color::from_rgba(100, 255, 100, 255));
+
+        draw_text(
+            "Press ESC to quit",
+            (screen_width() - 140.0) / 2.0,
+            y + 50.0,
+            24.0,
+            WHITE,
+        );
     }
 }
 
